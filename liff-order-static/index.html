@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>數倍DTF · 線上下單</title>
+  <meta name="description" content="數倍DTF 數位印刷 · LINE 線上下單" />
+  <link rel="stylesheet" href="./style.css" />
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" fill="none" aria-label="logo">
+        <rect x="2" y="2" width="28" height="28" rx="6" stroke="currentColor" stroke-width="2"/>
+        <path d="M9 22V10h5c3 0 5 2 5 6s-2 6-5 6H9z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        <circle cx="23" cy="22" r="2" fill="currentColor"/>
+      </svg>
+      <div>
+        <div class="brand-name">數倍DTF</div>
+        <div class="brand-sub">線上下單</div>
+      </div>
+    </div>
+    <div id="userChip" class="user-chip" hidden>
+      <img id="userAvatar" alt="" />
+      <span id="userName"></span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- 進度指示 -->
+    <ol class="steps" aria-label="步驟">
+      <li class="active" data-step="1"><span>1</span>客戶資料</li>
+      <li data-step="2"><span>2</span>訂單規格</li>
+      <li data-step="3"><span>3</span>上傳檔案</li>
+      <li data-step="4"><span>4</span>確認送出</li>
+    </ol>
+
+    <form id="orderForm" novalidate>
+      <!-- 步驟 1：客戶資料 -->
+      <section class="card" data-panel="1">
+        <h2>客戶資料</h2>
+        <p class="hint">首次下單請填寫，之後系統會自動帶入。</p>
+
+        <label class="field">
+          <span>客戶 / 公司名稱 <em>*</em></span>
+          <input name="customer_name" required autocomplete="organization" placeholder="例：溯潮開發有限公司 或 個人姓名" />
+        </label>
+
+        <div class="row">
+          <label class="field">
+            <span>聯絡人 <em>*</em></span>
+            <input name="contact_name" required autocomplete="name" placeholder="例：王小明" />
+          </label>
+          <label class="field">
+            <span>電話 <em>*</em></span>
+            <input name="phone" required type="tel" inputmode="tel" autocomplete="tel" placeholder="0912-345-678" />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>統一編號（開發票需要）</span>
+          <input name="tax_id" inputmode="numeric" pattern="[0-9]{8}" placeholder="8 碼" />
+        </label>
+
+        <div class="actions">
+          <button type="button" class="btn primary" data-next="2">下一步</button>
+        </div>
+      </section>
+
+      <!-- 步驟 2：訂單規格 -->
+      <section class="card" data-panel="2" hidden>
+        <h2>訂單規格</h2>
+
+        <div class="field">
+          <span>產品類型 <em>*</em></span>
+          <div class="cascade-selects">
+            <select name="product_category" id="productCategory">
+              <option value="">大類</option>
+              <option value="紡織">紡織</option>
+              <option value="UV">UV</option>
+            </select>
+            <select name="product_sub" id="productSub" disabled>
+              <option value="">子類</option>
+            </select>
+            <select name="product_spec" id="productSpec" disabled>
+              <option value="">規格</option>
+            </select>
+          </div>
+          <input type="hidden" name="product_type" id="productTypeHidden" />
+        </div>
+
+        <div class="row">
+          <label class="field">
+            <span>數量 <em>*</em></span>
+            <input name="quantity" required inputmode="numeric" placeholder="例：38M 或 500 張" />
+          </label>
+          <label class="field">
+            <span>成品尺寸</span>
+            <input name="size" placeholder="例：53 x 115 mm" />
+          </label>
+        </div>
+
+        <div class="row">
+          <label class="field">
+            <span>材質規格</span>
+            <input name="material" placeholder="例：熱轉印膜 / 透明水晶標" />
+          </label>
+          <label class="field">
+            <span>後加工需求</span>
+            <input name="finish" placeholder="例：裁切、白墨層、免刀模" />
+          </label>
+        </div>
+
+        <div class="row">
+          <label class="field">
+            <span>緊急程度</span>
+            <select name="priority">
+              <option>一般</option>
+              <option>優先</option>
+              <option>急件（需加價）</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>預定交貨日</span>
+            <input name="due_date" type="date" />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>特殊要求 / 備註</span>
+          <textarea name="notes" rows="3" placeholder="例：白底 3mm 出血、需送樣確認色差、指定機台..."></textarea>
+        </label>
+
+        <div class="actions">
+          <button type="button" class="btn ghost" data-prev="1">上一步</button>
+          <button type="button" class="btn primary" data-next="3">下一步</button>
+        </div>
+      </section>
+
+      <!-- 步驟 3：上傳檔案 -->
+      <section class="card" data-panel="3" hidden>
+        <h2>上傳打印檔案</h2>
+        <p class="hint">支援 AI / PSD / PDF / PNG / TIFF / JPG，單檔最大 200MB，可一次多選。</p>
+
+        <label class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" multiple accept=".ai,.psd,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.svg,.eps,.zip" class="sr-only" />
+          <div class="dz-inner">
+            <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M12 15V3M12 3l-4 4M12 3l4 4"/>
+              <rect x="3" y="15" width="18" height="6" rx="2"/>
+            </svg>
+            <div><strong>點此選擇檔案</strong> 或拖曳到這裡</div>
+            <div class="hint small">建議每個檔案以「用途_內容_尺寸」命名，例：熊熊_53x115.png</div>
+          </div>
+        </label>
+
+        <ul id="fileList" class="file-list" aria-live="polite"></ul>
+
+        <div class="actions">
+          <button type="button" class="btn ghost" data-prev="2">上一步</button>
+          <button type="button" class="btn primary" data-next="4">下一步</button>
+        </div>
+      </section>
+
+      <!-- 步驟 4：確認送出 -->
+      <section class="card" data-panel="4" hidden>
+        <h2>確認資訊</h2>
+        <p class="hint">送出後我們會在 24 小時內於 LINE 回覆您訂單編號與缺件確認。</p>
+        <div id="summary" class="summary"></div>
+
+        <label class="checkbox">
+          <input type="checkbox" id="agree" />
+          <span>我確認上述資訊無誤，並同意由業務端進行檔案預檢與報價確認。</span>
+        </label>
+
+        <div class="actions">
+          <button type="button" class="btn ghost" data-prev="3">上一步</button>
+          <button type="submit" id="submitBtn" class="btn primary" disabled>送出訂單</button>
+        </div>
+      </section>
+    </form>
+
+    <!-- 成功畫面 -->
+    <section id="successPanel" class="card success" hidden>
+      <div class="check-mark">
+        <svg viewBox="0 0 48 48" width="56" height="56" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="24" cy="24" r="20"/>
+          <path d="M15 25l7 7 12-14"/>
+        </svg>
+      </div>
+      <h2>訂單已送出</h2>
+      <p>訂單編號</p>
+      <div id="orderNoBig" class="order-no">—</div>
+      <p class="hint">已同步通知業務端，稍後將於 LINE 與您聯繫確認檔案與報價。</p>
+      <div class="actions center">
+        <button type="button" class="btn ghost" id="newOrderBtn">再下一單</button>
+        <button type="button" class="btn primary" id="closeLiffBtn">關閉視窗</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
