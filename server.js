@@ -175,6 +175,23 @@ function buildSfOrderPayload(order) {
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+
+/* ---- 後台管理員權限 ----
+ * 驗證 x-admin-token 或 Authorization: Bearer 或網址 ?token=
+ * 可用環境變數 ADMIN_TOKEN 覆寫（預設沿用目前後台的 token）
+ * ---- */
+const zlib = require("zlib");
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "MyW691xMzwJ2WaaKE7Bn9aBjTuceHQFG";
+function requireAdmin(req, res, next) {
+  const h = req.headers["x-admin-token"] || req.headers["authorization"] || "";
+  const t = String(h).replace(/^Bearer\s+/i, "").trim() || String(req.query.token || "").trim();
+  if (t !== ADMIN_TOKEN) return res.status(401).json({ ok: false, error: "未授權（需要 ADMIN_TOKEN）" });
+  next();
+}
+
+// 不讓 uploads 資料夾被公開下載，一律透過後台端點取檔
+app.use("/uploads", (req, res) => res.status(403).json({ ok: false, error: "請透過後台下載檔案" }));
+
 app.use(express.static(ROOT)); // 直接把當前資料夾當成靜態網站發布 index.html
 
 // 建立訂單
@@ -233,8 +250,83 @@ app.post("/api/orders/:no/complete", (req, res) => {
   res.json({ ok: true });
 });
 
-// 內部：訂單列表（給後台看用，正式版請加驗證）
-app.get("/api/orders", (req, res) => res.json(loadOrders().reverse()));
+// 後台：訂單列表（需 ADMIN_TOKEN）
+app.get("/api/orders", requireAdmin, (req, res) => res.json(loadOrders().reverse()));
+
+/* ---- 極簡 ZIP 產生器（只用內建 zlib，不需額外套件）---- */
+let crcTable = null;
+function crc32(buf) {
+  if (!crcTable) {
+    crcTable = new Int32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      crcTable[i] = c;
+    }
+  }
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) c = crcTable[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function buildZip(files) { // files: [{ name, data: Buffer }]
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+  const u16 = (v) => Buffer.from([v & 255, (v >>> 8) & 255]);
+  const u32 = (v) => Buffer.from([v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]);
+  for (const f of files) {
+    const nameBuf = Buffer.from(f.name, "utf8");
+    const data = f.data || Buffer.alloc(0);
+    const crc = crc32(data);
+    const comp = zlib.deflateRawSync(data);
+    const local = Buffer.concat([
+      u32(0x04034b50), u16(20), u16(0x0800), u16(8), u16(0), u16(0),
+      u32(crc), u32(comp.length), u32(data.length), u16(nameBuf.length), u16(0),
+      nameBuf, comp,
+    ]);
+    chunks.push(local);
+    central.push(Buffer.concat([
+      u32(0x02014b50), u16(0x0314), u16(20), u16(0x0800), u16(8), u16(0), u16(0),
+      u32(crc), u32(comp.length), u32(data.length), u16(nameBuf.length), u16(0), u16(0),
+      u16(0), u16(0), u32(0), u32(offset), nameBuf,
+    ]));
+    offset += local.length;
+  }
+  const cd = Buffer.concat(central);
+  const end = Buffer.concat([
+    u32(0x06054b50), u16(0), u16(0), u16(central.length), u16(central.length),
+    u32(cd.length), u32(offset), u16(0),
+  ]);
+  return Buffer.concat([...chunks, cd, end]);
+}
+
+// 後台：打包單筆訂單所有檔案為 zip 下載
+app.get("/api/orders/:no/download", requireAdmin, (req, res) => {
+  const order = loadOrders().find(o => o.order_no === req.params.no);
+  if (!order) return res.status(404).json({ ok: false, error: "訂單不存在" });
+  const files = [];
+  for (const f of (order.files || [])) {
+    const p = f.saved_as ? path.join(ROOT, f.saved_as) : "";
+    try { if (p && fs.statSync(p).isFile()) files.push({ name: f.name, data: fs.readFileSync(p) }); }
+    catch (e) { /* 缺檔就略過 */ }
+  }
+  if (!files.length) return res.status(404).json({ ok: false, error: "無可用檔案" });
+  const zip = buildZip(files);
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename="order_${order.order_no}.zip"`);
+  res.send(zip);
+});
+
+// 後台：單一檔案下載
+app.get("/api/orders/:no/files/:index/download", requireAdmin, (req, res) => {
+  const order = loadOrders().find(o => o.order_no === req.params.no);
+  const f = order && (order.files || [])[Number(req.params.index)];
+  if (!f) return res.status(404).json({ ok: false, error: "檔案不存在" });
+  const p = path.join(ROOT, f.saved_as || "");
+  if (!fs.existsSync(p)) return res.status(404).json({ ok: false, error: "檔案不存在於磁碟" });
+  res.download(p, f.name);
+});
 
 // 建立順豐運單（由業務端呼叫；僅限物流 = 順豐 的訂單）
 app.post("/api/orders/:no/sf-waybill", async (req, res) => {

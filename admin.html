@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>訂單後台・數倍DTF</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; background: #f4f6f9; color: #222; }
+  header { background: #0f2537; color: #fff; padding: 14px 20px; display: flex; align-items: center; gap: 12px; }
+  header b { font-size: 16px; }
+  .wrap { max-width: 860px; margin: 20px auto; padding: 0 14px; }
+  .bar { background: #fff; border: 1px solid #dde3ea; border-radius: 10px; padding: 14px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .bar input { flex: 1; min-width: 220px; padding: 9px 10px; border: 1px solid #c9d2dc; border-radius: 7px; font-size: 14px; }
+  .bar button { padding: 9px 18px; border: 0; border-radius: 7px; background: #0f2537; color: #fff; font-size: 14px; cursor: pointer; }
+  .bar .hint { color: #a34; font-size: 12px; width: 100%; }
+  .card { background: #fff; border: 1px solid #dde3ea; border-radius: 10px; margin: 12px 0; padding: 14px 16px; }
+  .card .top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
+  .card .no { font-weight: 700; font-size: 15px; }
+  .card .st { font-size: 12px; padding: 2px 8px; border-radius: 20px; }
+  .st.red { background: #fbe4e4; color: #b33; }
+  .st.green { background: #e2f3e6; color: #287a3a; }
+  .st.gray { background: #eceff3; color: #666; }
+  .meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 14px; margin: 10px 0; font-size: 13px; color: #444; }
+  .meta b { color: #222; }
+  .files { border-top: 1px dashed #dde3ea; margin-top: 8px; padding-top: 8px; }
+  .frow { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; }
+  .frow .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frow .qty { color: #888; white-space: nowrap; }
+  .dl { color: #1a6fb0; text-decoration: none; white-space: nowrap; }
+  .dl:hover { text-decoration: underline; }
+  .zipbtn { display: inline-block; margin-top: 8px; padding: 8px 16px; background: #1a6fb0; color: #fff; border-radius: 7px; text-decoration: none; font-size: 14px; }
+  .empty { color: #888; text-align: center; padding: 40px 0; }
+  .err { color: #b33; }
+</style>
+</head>
+<body>
+<header><b>訂單後台</b><span style="opacity:.7">數倍DTF</span></header>
+<div class="wrap">
+  <div class="bar">
+    <input id="api" placeholder="後端網址" value="https://aceeprint.pplx.app/port/3000">
+    <input id="token" type="password" placeholder="ADMIN_TOKEN">
+    <button onclick="load()">載入訂單</button>
+    <div class="hint">Token 只存在這台瀏覽器的 localStorage，不會上傳到別處。下載檔案的網址會自動附帶 ?token=。</div>
+  </div>
+  <div id="list"></div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const KEY = "admin_token";
+  $("token").value = localStorage.getItem(KEY) || "";
+  $("token").addEventListener("change", () => localStorage.setItem(KEY, $("token").value.trim()));
+
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+  function fmtSize(n) { n = Number(n) || 0; const u = ["B","KB","MB","GB"]; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(n >= 10 || i === 0 ? 0 : 1) + " " + u[i]; }
+  function stateCls(s) { return s === "received" ? "red" : (s === "files_uploaded" ? "green" : "gray"); }
+  function stateLbl(s) { return s === "received" ? "已收單（尚未傳檔）" : (s === "files_uploaded" ? "檔案已上傳" : s); }
+  function fmtDate(iso) { try { const d = new Date(iso); return d.toLocaleString("zh-TW", { hour12: false }); } catch (e) { return iso; } }
+  function kv(label, val) { return val === undefined || val === null || String(val).trim() === "" ? "" : `<div><b>${esc(label)}</b> ${esc(val)}</div>`; }
+
+  async function load() {
+    const api = $("api").value.trim().replace(/\/+$/, "");
+    const token = $("token").value.trim();
+    localStorage.setItem(KEY, token);
+    const box = $("list");
+    box.innerHTML = "<div class='empty'>讀取中…</div>";
+    if (!token) { box.innerHTML = "<div class='empty err'>請先輸入 ADMIN_TOKEN</div>"; return; }
+    let orders;
+    try {
+      const r = await fetch(api + "/api/orders", { headers: { "x-admin-token": token } });
+      if (r.status === 401) throw new Error("Token 錯誤或無權限（401）");
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      orders = await r.json();
+    } catch (e) {
+      box.innerHTML = "<div class='empty err'>讀取失敗：" + esc(e.message) + "</div>";
+      return;
+    }
+    if (!orders || !orders.length) { box.innerHTML = "<div class='empty'>目前沒有訂單</div>"; return; }
+    const tok = encodeURIComponent(token);
+    box.innerHTML = orders.map(o => {
+      const files = o.files || [];
+      const totalQty = files.reduce((s, f) => s + (Number(f.qty) || 0), 0);
+      const logo = o.logistics_method;
+      let addr = "";
+      if (String(logo).includes("門市") || String(logo).includes("超商") || String(logo).includes("ezShip")) {
+        addr = kv("門市", o.st_name) + kv("門市代碼", o.st_code) + kv("門市地址", o.st_addr);
+      } else {
+        addr = kv("收件人", o.recipient_name || o.rv_name) + kv("收件電話", o.recipient_phone || o.rv_phone)
+             + kv("收件地址", o.recipient_address || o.rv_addr || o.rv_address);
+      }
+      const fileRows = files.map((f, i) =>
+        `<div class="frow"><span class="nm">${esc(f.name)}</span><span class="qty">× ${f.qty || 1} · ${fmtSize(f.size)}</span>` +
+        `<a class="dl" href="${api}/api/orders/${o.order_no}/files/${i}/download?token=${tok}" download>下載</a></div>`
+      ).join("");
+      return `<div class="card">
+        <div class="top">
+          <span class="no">#${esc(o.order_no)}</span>
+          <span class="st ${stateCls(o.status)}">${esc(stateLbl(o.status))}</span>
+        </div>
+        <div class="meta">
+          ${kv("下單時間", fmtDate(o.created_at))}
+          ${kv("委製人", o.customer_name)}
+          ${kv("聯絡人", o.contact_name)}
+          ${kv("手機", o.phone)}
+          ${kv("LINE ID", o.line_id)}
+          ${kv("產品類型", o.product_type)}
+          ${kv("數量", o.quantity)}
+          ${kv("計價單位", o.billing_unit)}
+          ${kv("尺寸/規格", o.product_size || o.size)}
+          ${kv("材質", o.material_spec || o.material)}
+          ${kv("後加工", o.back_process || o.post_process)}
+          ${kv("緊急程度", o.urgent)}
+          ${kv("交貨日", o.delivery_date)}
+          ${kv("物流", o.logistics_method)}
+          ${addr}
+          ${kv("順豐運單號", (o.sf && (o.sf.waybill_no || "")) || "")}
+          ${kv("特殊要求", o.special_req)}
+          ${kv("備註", o.remark)}
+        </div>
+        <div class="files">
+          <div style="font-weight:600;margin-bottom:4px">檔案（${files.length} 個 · 共 ${totalQty} 次印製）</div>
+          ${fileRows || "<div style='color:#999;font-size:13px'>無檔案</div>"}
+          ${files.length ? `<a class="zipbtn" href="${api}/api/orders/${o.order_no}/download?token=${tok}">↓ 整包 ZIP 一次下載</a>` : ""}
+        </div>
+      </div>`;
+    }).join("");
+  }
+</script>
+</body>
+</html>
