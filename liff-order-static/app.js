@@ -12,12 +12,9 @@ const CONFIG = {
   // TODO：申請 LIFF 後填入預設 LIFF_ID，或直接用 ?liffId= 傳入
   LIFF_ID: "",
   // 後端接收訂單 API；
-  //   - 本機：空字串（用相對路徑）
-  //   - 平台預覽：__PORT_3000__ 佔位符會被替換成代理路徑
-  API_BASE: (() => {
-    const placeholder = "__PORT_3000__";
-    return placeholder.startsWith("__") ? "" : placeholder;
-  })(),
+  //   - 正式站後端由 pplx 平台代管（可跨網域呼叫、有持久磁碟存訂單與上傳檔）
+  //   - 網址參數 ?api=https://... 可臨時覆蓋
+  API_BASE: "https://aceeprint.pplx.app/port/3000",
   MAX_FILE_MB: 200,  // 單一檔案大小上限（MB）
   MAX_FILE_COUNT: 40,  // 單筆訂單檔案數量上限
   // 超商取貨：ezShip（台灣便利配）賣家帳號，需先在 ezShip 開通「網站串接」服務
@@ -352,8 +349,9 @@ function openStoreMap() {
   // 處理序號：ezShip 原值回傳，用來辨識是哪一次選擇
   const pid = "st" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   localStorage.removeItem("ezship_store_pending");
-  // 回傳頁路徑（和主頁同網域，才能共享 localStorage）
-  const rtURL = location.origin + location.pathname.replace(/[^/]*$/, "") + "ezship-return.html";
+  // 回傳端點：ezShip 選完門市用 POST 轉頁回來，Vercel 靜態檔不收 POST，
+  // 所以指向 serverless 函式 api/ezship-return（GET/POST 皆可）
+  const rtURL = "https://aceeprint.vercel.app/api/ezship-return";
   const url =
     "https://map.ezship.com.tw/ezship_map_web.jsp?suID=" + encodeURIComponent(CONFIG.EZSIP_SUID) +
     "&processID=" + encodeURIComponent(pid) +

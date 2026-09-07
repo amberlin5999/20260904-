@@ -352,8 +352,9 @@ function openStoreMap() {
   // 處理序號：ezShip 原值回傳，用來辨識是哪一次選擇
   const pid = "st" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   localStorage.removeItem("ezship_store_pending");
-  // 回傳頁路徑（和主頁同網域，才能共享 localStorage）
-  const rtURL = location.origin + location.pathname.replace(/[^/]*$/, "") + "ezship-return.html";
+  // 回傳端點：ezShip 選完門市用 POST 轉頁回來，Vercel 靜態檔不收 POST，
+  // 所以指向 serverless 函式 api/ezship-return（GET/POST 皆可）
+  const rtURL = "https://aceeprint.vercel.app/api/ezship-return";
   const url =
     "https://map.ezship.com.tw/ezship_map_web.jsp?suID=" + encodeURIComponent(CONFIG.EZSIP_SUID) +
     "&processID=" + encodeURIComponent(pid) +
