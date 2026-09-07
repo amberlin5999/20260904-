@@ -90,6 +90,23 @@
           <div class="hint small" id="unitHint">計價單位將依產品類型自動帶入</div>
         </div>
 
+        <h3 class="block-title">上傳打印檔案 <em>*</em></h3>
+        <p class="hint">支援 AI / PSD / PDF / PNG / TIFF / JPG，單檔最大 200MB、一單最多 40 個，可一次多選；上傳後可設定每個檔案的印製數量（預設 1）。</p>
+
+        <label class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" multiple accept=".ai,.psd,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.svg,.eps,.zip" class="sr-only" />
+          <div class="dz-inner">
+            <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M12 15V3M12 3l-4 4M12 3l4 4"/>
+              <rect x="3" y="15" width="18" height="6" rx="2"/>
+            </svg>
+            <div><strong>點此選擇檔案</strong> 或拖曳到這裡</div>
+            <div class="hint small">建議每個檔案以「用途_內容_尺寸」命名，例：熊熊_53x115.png</div>
+          </div>
+        </label>
+
+        <ul id="fileList" class="file-list" aria-live="polite"></ul>
+
         <div class="row">
           <label class="field">
             <span>成品尺寸</span>
@@ -131,23 +148,6 @@
           <span>特殊要求 / 備註</span>
           <textarea name="notes" rows="3" placeholder="例：白底 3mm 出血、需送樣確認色差、指定機台..."></textarea>
         </label>
-
-        <h3 class="block-title">上傳打印檔案 <em>*</em></h3>
-        <p class="hint">支援 AI / PSD / PDF / PNG / TIFF / JPG，單檔最大 200MB、一單最多 40 個，可一次多選；上傳後可設定每個檔案的印製數量（預設 1）。</p>
-
-        <label class="dropzone" id="dropzone">
-          <input type="file" id="fileInput" multiple accept=".ai,.psd,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.svg,.eps,.zip" class="sr-only" />
-          <div class="dz-inner">
-            <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6">
-              <path d="M12 15V3M12 3l-4 4M12 3l4 4"/>
-              <rect x="3" y="15" width="18" height="6" rx="2"/>
-            </svg>
-            <div><strong>點此選擇檔案</strong> 或拖曳到這裡</div>
-            <div class="hint small">建議每個檔案以「用途_內容_尺寸」命名，例：熊熊_53x115.png</div>
-          </div>
-        </label>
-
-        <ul id="fileList" class="file-list" aria-live="polite"></ul>
 
         <div class="actions">
           <button type="button" class="btn ghost" data-prev="1">上一步</button>
