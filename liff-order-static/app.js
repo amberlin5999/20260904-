@@ -19,6 +19,7 @@ const CONFIG = {
     return placeholder.startsWith("__") ? "" : placeholder;
   })(),
   MAX_FILE_MB: 200,  // 單一檔案大小上限（MB）
+  MAX_FILE_COUNT: 40,  // 單筆訂單檔案數量上限
   // 超商取貨：ezShip（台灣便利配）賣家帳號，需先在 ezShip 開通「網站串接」服務
   EZSIP_SUID: "",
 };
@@ -435,6 +436,11 @@ fileInput.addEventListener("change", (e) => addFiles(e.target.files));
 function addFiles(fileListObj) {
   const arr = Array.from(fileListObj || []);
   for (const f of arr) {
+    // 檔案數量檢查：單筆訂單最多 MAX_FILE_COUNT 個
+    if (state.files.length >= CONFIG.MAX_FILE_COUNT) {
+      toast(`單筆訂單最多上傳 ${CONFIG.MAX_FILE_COUNT} 個檔案，已停止加入`, true);
+      break;
+    }
     // 檔案大小檢查
     if (f.size > CONFIG.MAX_FILE_MB * 1024 * 1024) {
       toast(`${f.name} 超過 ${CONFIG.MAX_FILE_MB}MB，未加入`, true);
