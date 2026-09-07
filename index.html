@@ -31,9 +31,8 @@
     <!-- 進度指示 -->
     <ol class="steps" aria-label="步驟">
       <li class="active" data-step="1"><span>1</span>客戶資料</li>
-      <li data-step="2"><span>2</span>訂單規格</li>
-      <li data-step="3"><span>3</span>上傳檔案</li>
-      <li data-step="4"><span>4</span>確認送出</li>
+      <li data-step="2"><span>2</span>訂單規格與檔案</li>
+      <li data-step="3"><span>3</span>確認送出</li>
     </ol>
 
     <form id="orderForm" novalidate>
@@ -68,9 +67,9 @@
         </div>
       </section>
 
-      <!-- 步驟 2：訂單規格 -->
+      <!-- 步驟 2：訂單規格 + 檔案上傳 -->
       <section class="card" data-panel="2" hidden>
-        <h2>訂單規格</h2>
+        <h2>訂單規格與檔案</h2>
 
         <div class="field">
           <span>產品類型 <em>*</em></span>
@@ -88,31 +87,25 @@
             </select>
           </div>
           <input type="hidden" name="product_type" id="productTypeHidden" />
+          <div class="hint small" id="unitHint">計價單位將依產品類型自動帶入</div>
         </div>
 
         <div class="row">
-          <label class="field">
-            <span>數量 <em>*</em></span>
-            <input name="quantity" required inputmode="numeric" placeholder="例：38M 或 500 張" />
-          </label>
           <label class="field">
             <span>成品尺寸</span>
             <input name="size" placeholder="例：53 x 115 mm" />
           </label>
-        </div>
-
-        <div class="row">
           <label class="field">
             <span>材質規格</span>
             <input name="material" placeholder="例：熱轉印膜 / 透明水晶標" />
           </label>
+        </div>
+
+        <div class="row">
           <label class="field">
             <span>後加工需求</span>
             <input name="finish" placeholder="例：裁切、白墨層、免刀模" />
           </label>
-        </div>
-
-        <div class="row">
           <label class="field">
             <span>緊急程度</span>
             <select name="priority">
@@ -121,9 +114,16 @@
               <option>急件（需加價）</option>
             </select>
           </label>
+        </div>
+
+        <div class="row">
           <label class="field">
             <span>預定交貨日</span>
             <input name="due_date" type="date" />
+          </label>
+          <label class="field">
+            <span>計價單位</span>
+            <input name="unit" id="unitInput" readonly placeholder="依產品帶入" />
           </label>
         </div>
 
@@ -132,16 +132,8 @@
           <textarea name="notes" rows="3" placeholder="例：白底 3mm 出血、需送樣確認色差、指定機台..."></textarea>
         </label>
 
-        <div class="actions">
-          <button type="button" class="btn ghost" data-prev="1">上一步</button>
-          <button type="button" class="btn primary" data-next="3">下一步</button>
-        </div>
-      </section>
-
-      <!-- 步驟 3：上傳檔案 -->
-      <section class="card" data-panel="3" hidden>
-        <h2>上傳打印檔案</h2>
-        <p class="hint">支援 AI / PSD / PDF / PNG / TIFF / JPG，單檔最大 200MB，可一次多選。</p>
+        <h3 class="block-title">上傳打印檔案 <em>*</em></h3>
+        <p class="hint">支援 AI / PSD / PDF / PNG / TIFF / JPG，單檔最大 200MB，可一次多選；上傳後可設定每個檔案的印製數量（預設 1）。</p>
 
         <label class="dropzone" id="dropzone">
           <input type="file" id="fileInput" multiple accept=".ai,.psd,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.svg,.eps,.zip" class="sr-only" />
@@ -158,16 +150,52 @@
         <ul id="fileList" class="file-list" aria-live="polite"></ul>
 
         <div class="actions">
-          <button type="button" class="btn ghost" data-prev="2">上一步</button>
-          <button type="button" class="btn primary" data-next="4">下一步</button>
+          <button type="button" class="btn ghost" data-prev="1">上一步</button>
+          <button type="button" class="btn primary" data-next="3">下一步</button>
         </div>
       </section>
 
-      <!-- 步驟 4：確認送出 -->
-      <section class="card" data-panel="4" hidden>
+      <!-- 步驟 3：確認送出 + 物流 -->
+      <section class="card" data-panel="3" hidden>
         <h2>確認資訊</h2>
         <p class="hint">送出後我們會在 24 小時內於 LINE 回覆您訂單編號與缺件確認。</p>
         <div id="summary" class="summary"></div>
+
+        <div class="field">
+          <span>物流方式 <em>*</em></span>
+          <select name="logistics_method" id="logisticsMethod">
+            <option value="">請選擇</option>
+            <option value="順豐">順豐</option>
+            <option value="超商取貨">超商取貨</option>
+            <option value="自取">自取</option>
+          </select>
+        </div>
+
+        <div id="recipientFields" class="block" hidden>
+          <div class="row">
+            <label class="field">
+              <span>收件人 <em>*</em></span>
+              <input name="recipient_name" placeholder="例：王小明" />
+            </label>
+            <label class="field">
+              <span>收件電話 <em>*</em></span>
+              <input name="recipient_phone" type="tel" inputmode="tel" placeholder="0912-345-678" />
+            </label>
+          </div>
+          <div id="addressField" hidden>
+            <label class="field">
+              <span>收件地址 <em>*</em></span>
+              <textarea name="recipient_address" rows="2" placeholder="例：台北市大安區復興南路一段 100 號"></textarea>
+            </label>
+          </div>
+          <div id="storeField" hidden>
+            <label class="field">
+              <span>取貨門市 <em>*</em></span>
+              <input name="store_name" placeholder="例：7-11 新復興門市（可貼店號）" />
+              <div class="hint small">將串接台灣便利配門市查詢 API，目前先手動填寫</div>
+            </label>
+          </div>
+        </div>
 
         <label class="checkbox">
           <input type="checkbox" id="agree" />
@@ -175,7 +203,7 @@
         </label>
 
         <div class="actions">
-          <button type="button" class="btn ghost" data-prev="3">上一步</button>
+          <button type="button" class="btn ghost" data-prev="2">上一步</button>
           <button type="submit" id="submitBtn" class="btn primary" disabled>送出訂單</button>
         </div>
       </section>

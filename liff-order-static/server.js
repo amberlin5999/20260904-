@@ -89,12 +89,15 @@ app.post("/api/orders/:no/files", upload.single("file"), (req, res) => {
   const f = req.file;
   // multer 預設把 multipart 檔名當 latin1，這裡轉回 UTF-8
   const originalName = Buffer.from(f.originalname, "latin1").toString("utf8");
+  // 每個檔案的印製數量（前端送出，預設 1）
+  const qty = Number(req.body.qty) || 1;
   list[idx].files.push({
     name: originalName,
     size: f.size,
     mimetype: f.mimetype,
     saved_as: path.relative(ROOT, f.path).replace(/\\/g, "/"),
     uploaded_at: new Date().toISOString(),
+    qty,
   });
   saveOrders(list);
   res.json({ ok: true, file: f.originalname });

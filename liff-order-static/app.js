@@ -33,8 +33,8 @@ const CONFIG = {
  * 全域狀態（前端共用資料）
  * ========================== */
 const state = {
-  step: 1,             // 目前步驟（1~4）
-  files: [],           // 已選擇的檔案清單 [{ id, file, name, size, type, thumb }]
+  step: 1,             // 目前步驟（1~3）
+  files: [],           // 已選擇的檔案清單 [{ id, file, name, size, type, thumb, qty }]
   lineProfile: null,   // LINE 用戶資料 { userId, displayName, pictureUrl }，非 LINE 環境為 null
   isInLine: false,     // 是否在 LINE 內建瀏覽器中開啟
 };
@@ -47,6 +47,11 @@ const state = {
  *   紡織 > DTF > 60cm R to R / A3
  *   紡織 > 直噴（無第三層）
  *   UV   > 一般水晶標 / 燙金水晶標 / 直噴（均無第三層）
+ *
+ * 計價單位（依產品自動帶入）：
+ *   R to R            → 次
+ *   DTF A3 / 水晶標   → 張
+ *   直噴              → 件
  * ========================== */
 const PRODUCT_TREE = {
   "紡織": {
@@ -60,9 +65,35 @@ const PRODUCT_TREE = {
   }
 };
 
+/** 依目前所選的產品組合，回傳計價單位 */
+function getUnit() {
+  const cat = document.getElementById("productCategory")?.value || "";
+  const sub = document.getElementById("productSub")?.value || "";
+  const spec = document.getElementById("productSpec")?.value || "";
+  if (cat === "紡織" && sub === "DTF") {
+    if (spec === "60cm R to R") return "次";
+    if (spec === "A3") return "張";
+    return "";  // 規格尚未選齊
+  }
+  if (cat === "紡織" && sub === "直噴") return "件";
+  if (cat === "UV" && sub === "直噴") return "件";
+  if (cat === "UV" && (sub === "一般水晶標" || sub === "燙金水晶標")) return "張";
+  return "";
+}
+
+/** 同步更新畫面上的計價單位（欄位 + 提示文字 + 每個檔案的單位標籤） */
+function updateUnit() {
+  const unit = getUnit();
+  const unitInput = document.getElementById("unitInput");
+  if (unitInput) unitInput.value = unit;
+  const hint = document.getElementById("unitHint");
+  if (hint) hint.textContent = unit ? `計價單位：${unit}` : "計價單位將依產品類型自動帶入";
+  document.querySelectorAll("[data-unit-label]").forEach(el => { el.textContent = unit || ""; });
+}
+
 /**
  * 初始化三層連動下拉選單
- * - 大類 change → 動態載入子類選項
+ * - 大類 change → 動態載入子類選項，並更新計價單位
  * - 子類 change → 有規格則載入規格，沒有則直接組合 product_type
  * - 規格 change → 組合 product_type 到 hidden 欄位
  * - 組合格式：「大類 - 子類 - 規格」或「大類 - 子類」
@@ -83,7 +114,7 @@ function initCascadeSelects() {
 
     const cat = catEl.value;
     // 如果沒選大類，或 tree 中找不到對應資料，則停用子類
-    if (!cat || !PRODUCT_TREE[cat]) { subEl.disabled = true; return; }
+    if (!cat || !PRODUCT_TREE[cat]) { subEl.disabled = true; updateUnit(); return; }
 
     // 啟用子類 → 動態建立子類選項
     subEl.disabled = false;
@@ -95,6 +126,7 @@ function initCascadeSelects() {
     }
     // 如果子類只有一個選項，自動選取並觸發 change
     if (subs.length === 1) { subEl.value = subs[0]; subEl.dispatchEvent(new Event("change")); }
+    updateUnit();
   });
 
   // === 子類變動：判斷是否有規格層 ===
@@ -103,7 +135,7 @@ function initCascadeSelects() {
     hiddenEl.value = "";
     const cat = catEl.value;
     const sub = subEl.value;
-    if (!cat || !sub) { specEl.disabled = true; updateProductHidden(); return; }
+    if (!cat || !sub) { specEl.disabled = true; updateProductHidden(); updateUnit(); return; }
 
     const specs = PRODUCT_TREE[cat][sub] || [];
     if (specs.length === 0) {
@@ -119,10 +151,11 @@ function initCascadeSelects() {
         specEl.appendChild(opt);
       }
     }
+    updateUnit();
   });
 
-  // === 規格變動：更新組合值 ===
-  specEl.addEventListener("change", updateProductHidden);
+  // === 規格變動：更新組合值與計價單位 ===
+  specEl.addEventListener("change", () => { updateProductHidden(); updateUnit(); });
 
   /** 將大類、子類、規格組合成 product_type 字串，寫入 hidden 欄位 */
   function updateProductHidden() {
@@ -166,11 +199,10 @@ async function initLiff() {
 }
 
 /* ==========================
- * 步驟導覽（4 步驟表單向導）
+ * 步驟導覽（3 步驟表單向導）
  * Step 1: 客戶資料
- * Step 2: 訂單規格
- * Step 3: 上傳檔案
- * Step 4: 確認送出
+ * Step 2: 訂單規格 + 檔案上傳
+ * Step 3: 確認 + 物流 + 送出
  * ========================== */
 
 /** 切換到指定步驟，更新面板顯示和進度指示器 */
@@ -187,16 +219,16 @@ function goToStep(n) {
   });
   state.step = n;
 
-  // 進入第 4 步時，渲染訂單摘要
-  if (n === 4) renderSummary();
+  // 進入最後一步時，渲染訂單摘要 + 更新物流欄位顯示
+  if (n === 3) { renderSummary(); syncLogisticsFields(); }
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 /**
  * 驗證指定步驟的所有必填欄位
  * - 檢查所有 [required] 的 input / select / textarea 是否有值
- * - Step 2 額外檢查產品類型 hidden 欄位
- * - Step 3 要求至少上傳一個檔案
+ * - Step 2 檢查產品類型、至少要一個檔案、每個檔案數量 ≥ 1
+ * - Step 3 檢查物流方式與其對應欄位、要勾選同意
  * @returns {boolean} 驗證是否通過
  */
 function validateStep(n) {
@@ -210,14 +242,26 @@ function validateStep(n) {
       return false;
     }
   }
-  // 產品類型：檢查 hidden 欄位（三層連動下拉的組合值）
+
+  // Step 2：產品類型 + 檔案數量
   if (n === 2) {
     const hidden = document.getElementById("productTypeHidden");
     if (!hidden.value) {
       toast("請選擇產品類型", true);
       return false;
     }
+    if (state.files.length === 0) {
+      toast("請至少上傳一個檔案", true);
+      return false;
+    }
+    for (const f of state.files) {
+      if (!(Number(f.qty) >= 1)) {
+        toast("請確認每個檔案的印製數量", true);
+        return false;
+      }
+    }
   }
+
   // 統編格式驗證（選填，但填了就要 8 碼數字）
   const taxId = panel.querySelector('[name="tax_id"]');
   if (taxId && taxId.value && !/^\d{8}$/.test(taxId.value)) {
@@ -225,11 +269,34 @@ function validateStep(n) {
     toast("統編需為 8 碼數字", true);
     return false;
   }
-  // Step 3 至少要有一個檔案
-  if (n === 3 && state.files.length === 0) {
-    toast("請至少上傳一個檔案", true);
-    return false;
+
+  // Step 3：物流方式 + 收件資訊 + 同意勾選
+  if (n === 3) {
+    const method = document.getElementById("logisticsMethod").value;
+    if (!method) {
+      toast("請選擇物流方式", true);
+      document.getElementById("logisticsMethod").focus();
+      return false;
+    }
+    if (method !== "自取") {
+      const nameEl = panel.querySelector('[name="recipient_name"]');
+      const phoneEl = panel.querySelector('[name="recipient_phone"]');
+      if (!nameEl.value.trim()) { toast("請填寫收件人", true); nameEl.focus(); return false; }
+      if (!phoneEl.value.trim()) { toast("請填寫收件電話", true); phoneEl.focus(); return false; }
+      if (method === "順豐") {
+        const addrEl = panel.querySelector('[name="recipient_address"]');
+        if (!addrEl.value.trim()) { toast("請填寫收件地址", true); addrEl.focus(); return false; }
+      } else if (method === "超商取貨") {
+        const storeEl = panel.querySelector('[name="store_name"]');
+        if (!storeEl.value.trim()) { toast("請填寫取貨門市", true); storeEl.focus(); return false; }
+      }
+    }
+    if (!document.getElementById("agree").checked) {
+      toast("請勾選「確認資訊無誤」", true);
+      return false;
+    }
   }
+
   return true;
 }
 
@@ -247,8 +314,29 @@ document.addEventListener("click", (e) => {
 });
 
 /* ==========================
+ * 物流方式連動顯示
+ * 順豐 → 收件人 + 電話 + 地址
+ * 超商取貨 → 收件人 + 電話 + 門市
+ * 自取 → 不需要收件資料
+ * ========================== */
+function syncLogisticsFields() {
+  const method = document.getElementById("logisticsMethod").value;
+  const recipient = document.getElementById("recipientFields");
+  const address = document.getElementById("addressField");
+  const store = document.getElementById("storeField");
+  recipient.hidden = method === "自取" || !method;
+  address.hidden = method !== "順豐";
+  store.hidden = method !== "超商取貨";
+}
+
+document.addEventListener("change", (e) => {
+  if (e.target.id === "logisticsMethod") syncLogisticsFields();
+});
+
+/* ==========================
  * 檔案上傳區塊
  * 支援拖曳上傳和點擊選擇檔案
+ * 每個檔案可設定各自的印製數量（預設 1）
  * ========================== */
 const dz = document.getElementById("dropzone");        // 拖曳上傳區域
 const fileInput = document.getElementById("fileInput"); // 隱藏的檔案選擇 input
@@ -275,7 +363,7 @@ fileInput.addEventListener("change", (e) => addFiles(e.target.files));
 /**
  * 將選擇的檔案加入上傳清單
  * - 檢查檔案大小是否超過上限
- * - 為每個檔案建立唯一 ID
+ * - 為每個檔案建立唯一 ID，數量預設 1
  * - 圖片格式自動產生縮圖
  * @param {FileList} fileListObj - 使用者選擇的檔案列表
  */
@@ -289,7 +377,7 @@ function addFiles(fileListObj) {
     }
     // 建立檔案物件並加入全域狀態
     const id = crypto.randomUUID();  // 產生唯一 ID
-    const item = { id, file: f, name: f.name, size: f.size, type: f.type, thumb: null };
+    const item = { id, file: f, name: f.name, size: f.size, type: f.type, thumb: null, qty: 1 };
     state.files.push(item);
     renderFileItem(item);  // 在畫面上顯示檔案項目
 
@@ -305,11 +393,12 @@ function addFiles(fileListObj) {
     }
   }
   fileInput.value = "";  // 清空 input，允許重複選同檔案
+  updateUnit();          // 同步更新單位標籤
 }
 
 /**
  * 在畫面上渲染一個檔案項目（<li>）
- * 顯示：副檔名縮圖 / 檔名 / 檔案大小 / 移除按鈕
+ * 顯示：副檔名縮圖 / 檔名 / 檔案大小 / 印製數量控制器 / 移除按鈕
  */
 function renderFileItem(item) {
   const li = document.createElement("li");
@@ -317,6 +406,7 @@ function renderFileItem(item) {
   li.dataset.id = item.id;
   // 取副檔名作為縮圖文字（截取前 4 字元）
   const ext = (item.name.split(".").pop() || "").toUpperCase().slice(0, 4);
+  const unit = getUnit() || "";
   li.innerHTML = `
     <div class="thumb">${ext}</div>
     <div class="meta">
@@ -324,8 +414,29 @@ function renderFileItem(item) {
       <div class="sub">${formatSize(item.size)} · <span class="status">待送出</span></div>
       <div class="progress-bar" hidden><i></i></div>
     </div>
+    <div class="qty">
+      <button type="button" class="qty-btn qty-dec" title="減少">−</button>
+      <input type="number" class="qty-input" value="${item.qty}" min="1" inputmode="numeric" aria-label="印製數量" />
+      <button type="button" class="qty-btn qty-inc" title="增加">+</button>
+      <span class="qty-unit" data-unit-label>${unit}</span>
+    </div>
     <button type="button" class="remove" aria-label="移除" title="移除">&times;</button>
   `;
+
+  const updateQty = (v) => {
+    v = Math.max(1, Math.floor(Number(v) || 1));
+    item.qty = v;
+    qtyInput.value = v;
+  };
+
+  const qtyInput = li.querySelector(".qty-input");
+  // 減少數量（最低 1）
+  li.querySelector(".qty-dec").addEventListener("click", () => updateQty((Number(qtyInput.value) || 1) - 1));
+  // 增加數量
+  li.querySelector(".qty-inc").addEventListener("click", () => updateQty((Number(qtyInput.value) || 1) + 1));
+  // 直接輸入數量
+  qtyInput.addEventListener("change", () => updateQty(qtyInput.value));
+
   // 點擊 × 移除檔案
   li.querySelector(".remove").addEventListener("click", () => {
     state.files = state.files.filter(x => x.id !== item.id);
@@ -350,7 +461,7 @@ function updateFileProgress(id, pct, status) {
 }
 
 /* ==========================
- * 訂單摘要（Step 4）
+ * 訂單摘要（Step 3）
  * ========================== */
 
 /** 從表單收集所有欄位資料，回傳物件 */
@@ -361,9 +472,15 @@ function collectFormData() {
   return obj;
 }
 
-/** 渲染 Step 4 的訂單摘要，包含所有欄位和已選檔案清單 */
+/** 加總所有檔案的印製數量 */
+function totalQty() {
+  return state.files.reduce((s, f) => s + (Number(f.qty) || 0), 0);
+}
+
+/** 渲染 Step 3 的訂單摘要，包含所有欄位和已選檔案清單 */
 function renderSummary() {
   const d = collectFormData();
+  const unit = getUnit() || d.unit || "";
   // 要顯示的欄位列表（標籤, 值）
   const rows = [
     ["客戶", d.customer_name],
@@ -371,7 +488,6 @@ function renderSummary() {
     ["電話", d.phone],
     ["統編", d.tax_id || "—"],
     ["產品類型", d.product_type],
-    ["數量", d.quantity],
     ["尺寸", d.size || "—"],
     ["材質", d.material || "—"],
     ["後加工", d.finish || "—"],
@@ -381,14 +497,14 @@ function renderSummary() {
   ];
   // 產生 <dl> 摘要 HTML
   const dlHtml = rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(String(v || "—"))}</dd>`).join("");
-  // 產生檔案清單 HTML
+  // 產生檔案清單 HTML（每個檔案顯示 ×印製數量）
   const filesHtml = state.files.length
-    ? state.files.map(f => `• ${escapeHtml(f.name)} <span style="color:var(--ink-3)">(${formatSize(f.size)})</span>`).join("<br />")
+    ? state.files.map(f => `• ${escapeHtml(f.name)} <span style="color:var(--ink-3)">× ${f.qty} ${unit} · ${formatSize(f.size)}</span>`).join("<br />")
     : "（無檔案）";
 
   document.getElementById("summary").innerHTML = `
     <dl>${dlHtml}</dl>
-    <div class="files"><strong>檔案（${state.files.length}）</strong><br />${filesHtml}</div>
+    <div class="files"><strong>檔案（${state.files.length} 個 · 共計 ${totalQty()} ${unit}）</strong><br />${filesHtml}</div>
   `;
   // 重置同意勾選和送出按鈕
   document.getElementById("agree").checked = false;
@@ -404,14 +520,14 @@ document.getElementById("agree").addEventListener("change", (e) => {
  * 表單送出流程
  * 1. 驗證所有步驟
  * 2. 建立訂單（POST /api/orders）
- * 3. 逐檔上傳（POST /api/orders/:no/files）
+ * 3. 逐檔上傳（POST /api/orders/:no/files，附帶該檔印製數量）
  * 4. 通知後端上傳完成（POST /api/orders/:no/complete）
  * 5. 若在 LINE 內，發送摘要訊息到聊天室
  * 6. 顯示成功畫面
  * ========================== */
 document.getElementById("orderForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  // 驗證三個步驟的必填欄位
+  // 驗證所有步驟的必填欄位
   if (!validateStep(1) || !validateStep(2) || !validateStep(3)) return;
 
   const btn = document.getElementById("submitBtn");
@@ -424,13 +540,16 @@ document.getElementById("orderForm").addEventListener("submit", async (e) => {
     orderPayload.line_display_name = state.lineProfile?.displayName || null;
     orderPayload.source = state.isInLine ? "LINE-LIFF" : "WEB";  // 標記訂單來源
     orderPayload.client_time = new Date().toISOString();
+    // 總印製數量 = 所有檔案數量加總；計價單位依產品帶入
+    orderPayload.quantity = totalQty();
+    orderPayload.unit = getUnit() || "";
 
     // Step 1：建立訂單，取得訂單編號
     const orderRes = await postJSON(`${CONFIG.API_BASE}/api/orders`, orderPayload);
     if (!orderRes.ok) throw new Error(orderRes.error || "建立訂單失敗");
     const orderNo = orderRes.order_no;
 
-    // Step 2：逐檔上傳（每個檔案上傳完成後才上下一個）
+    // Step 2：逐檔上傳（每個檔案附帶印製數量，上傳完成才上下一個）
     for (const item of state.files) {
       updateFileProgress(item.id, 5, "上傳中");
       await uploadFile(orderNo, item, (pct) => updateFileProgress(item.id, pct, "上傳中"));
@@ -445,7 +564,7 @@ document.getElementById("orderForm").addEventListener("submit", async (e) => {
       try {
         await liff.sendMessages([{
           type: "text",
-          text: `【已下單】${orderPayload.customer_name}\n訂單編號：${orderNo}\n產品：${orderPayload.product_type}\n數量：${orderPayload.quantity}\n預定交貨：${orderPayload.due_date || "未指定"}\n附件：${state.files.length} 個檔案`
+          text: `【已下單】${orderPayload.customer_name}\n訂單編號：${orderNo}\n產品：${orderPayload.product_type}\n印製量：${totalQty()} ${orderPayload.unit || ""}\n物流：${orderPayload.logistics_method}\n預定交貨：${orderPayload.due_date || "未指定"}\n檔案：${state.files.length} 個`
         }]);
       } catch (e) { /* 使用者拒絕授權也不影響下單流程 */ }
     }
@@ -496,8 +615,9 @@ async function postJSON(url, data) {
 
 /**
  * 上傳單一檔案到後端（使用 XMLHttpRequest 以支援進度回報）
+ * 同時把該檔案的印製數量（qty）一起送出
  * @param {string}   orderNo   - 訂單編號
- * @param {object}   item      - 檔案物件 { file, name, ... }
+ * @param {object}   item      - 檔案物件 { file, name, qty, ... }
  * @param {function} onProgress - 進度回呼（參數為 0~100 的百分比）
  * @returns {Promise<object>} 上傳成功的回應
  */
@@ -506,6 +626,7 @@ function uploadFile(orderNo, item, onProgress) {
     const xhr = new XMLHttpRequest();
     const fd = new FormData();
     fd.append("file", item.file, item.name);
+    fd.append("qty", String(item.qty || 1));
     xhr.open("POST", `${CONFIG.API_BASE}/api/orders/${encodeURIComponent(orderNo)}/files`);
     // 上傳進度回報
     xhr.upload.onprogress = (e) => {
@@ -561,5 +682,6 @@ function toast(msg, isError) {
  * 程式啟動
  * ========================== */
 initCascadeSelects();  // 初始化產品類型三層連動下拉
+updateUnit();          // 初始化計價單位顯示
 initLiff();            // 初始化 LINE LIFF（非 LINE 環境會自動跳過）
 goToStep(1);           // 從第 1 步開始
