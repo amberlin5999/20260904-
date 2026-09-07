@@ -33,6 +33,7 @@
   .pb-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #dde3ea; }
   .pb-row button { padding: 8px 12px; border: 0; border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 600; color: #fff; }
   .pb-check { background: #8a6d3b; }
+  .pb-xls { background: #2e7d46; }
   .pb-work { background: #2f6f7d; }
   .pb-qc { background: #5a3f8f; }
   .empty { color: #888; text-align: center; padding: 40px 0; }
@@ -192,6 +193,79 @@
     openDoc("品管確認單", body, o.order_no);
   }
 
+  /* ---- 檔案確認單 XLS 匯出（附尺寸數字，方便加總） ---- */
+  function escapeXml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&apos;" }[c])); }
+  function parseDim(s) {
+    const m = String(s || "").match(/(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)/);
+    return m ? [parseFloat(m[1]), parseFloat(m[2])] : [null, null];
+  }
+  function numXml(v) { return v === null || v === "" || isNaN(Number(v)) ? "" : `<Cell><Data ss:Type="Number">${Number(v)}</Data></Cell>`; }
+  function strXml(v) { return `<Cell><Data ss:Type="String">${escapeXml(v)}</Data></Cell>`; }
+
+  function exportCheckXls(o) {
+    const files = o.files || [];
+    const rows = [];
+    files.forEach((f, i) => {
+      const [a, b] = parseDim(o.size);
+      rows.push([
+        ["訂單編號", o.order_no], ["客戶名稱", o.customer_name], ["下單日期", fmtDate(o.created_at)],
+        ["產品類型", o.product_type], ["序號", i + 1], ["原始檔名", f.name],
+        ["數量", f.qty || 1], ["尺寸(輸入)", o.size || ""],
+        ["尺寸值1", a], ["尺寸值2", b],
+        ["值1×數量", a === null ? "" : (a * (f.qty || 1))],
+        ["值2×數量", b === null ? "" : (b * (f.qty || 1))],
+        ["材質", o.material || ""], ["交貨日", o.due_date || ""], ["備註", o.notes || ""],
+      ]);
+    });
+    if (!files.length) rows.push([["訂單編號", o.order_no], ["客戶名稱", o.customer_name], ["下單日期", fmtDate(o.created_at)], ["備註", "無檔案"], ["原始檔名", ""], ["數量", ""]]);
+
+    const headers = ["訂單編號","客戶名稱","下單日期","產品類型","序號","原始檔名","數量","尺寸(輸入)","尺寸值1(mm)","尺寸值2(mm)","值1×數量(mm)","值2×數量(mm)","材質","交貨日","備註"];
+    let sumA = 0, sumB = 0, sumAq = 0, sumBq = 0;
+    rows.forEach(r => {
+      const qty = Number(r[6][1]) || 1;
+      const a = r[8][1], b = r[9][1];
+      if (a !== null && a !== "" && a !== undefined) { sumA += Number(a); sumAq += Number(a) * qty; }
+      if (b !== null && b !== "" && b !== undefined) { sumB += Number(b); sumBq += Number(b) * qty; }
+    });
+
+    const cells = (r) => {
+      const out = [];
+      r.forEach((box, bi) => {
+        const v = box[1];
+        const isNum = bi === 8 || bi === 9 || bi === 10 || bi === 11;
+        out.push(isNum ? numXml(v) : strXml(v));
+      });
+      return out.join("");
+    };
+    const headTag = headers.map(h => `<Cell><Data ss:Type="String">${escapeXml(h)}</Data></Cell>`).join("");
+    const totalRow = `${strXml("#合計")}${strXml("")}${strXml("")}${strXml("")}${strXml("")}${strXml("")}${strXml("")}${strXml("尺寸加總")}${numXml(sumA)}${numXml(sumB)}${numXml(sumAq)}${numXml(sumBq)}${strXml("")}${strXml("")}${strXml("")}`;
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+ <Worksheet ss:Name="檔案確認單">
+  <Table>
+   <Row><Cell ss:StyleID="Head"><Data ss:Type="String">${escapeXml(o.order_no)} 檔案確認單</Data></Cell></Row>
+   <Row>${headTag}</Row>
+   ${rows.map(r => `<Row>${cells(r)}</Row>`).join("")}
+   <Row>${totalRow}</Row>
+  </Table>
+ </Worksheet>
+</Workbook>`;
+    const blob = new Blob(["\uFEFF" + xml], { type: "application/vnd.ms-excel;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `檔案確認單_${o.order_no}.xls`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+  }
+
   async function load() {
     const api = $("api").value.trim().replace(/\/+$/, "");
     const token = $("token").value.trim();
@@ -259,6 +333,7 @@
         </div>
         <div class="pb-row">
           <button class="pb-check" onclick="printCheck(orders[${idx}])">R 檔案確認單</button>
+          <button class="pb-xls" onclick="exportCheckXls(orders[${idx}])">XLS 確認單</button>
           <button class="pb-work" onclick="printWork(orders[${idx}])">W 派工單</button>
           <button class="pb-qc" onclick="printQc(orders[${idx}])">QC 品管確認單</button>
         </div>
