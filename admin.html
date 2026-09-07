@@ -54,6 +54,7 @@
 <script>
   const $ = (id) => document.getElementById(id);
   const KEY = "admin_token";
+  let orders = [];  // 全域訂單快取（按鈕 click 需在這裡讀）
   $("token").value = localStorage.getItem(KEY) || "";
   $("token").addEventListener("change", () => localStorage.setItem(KEY, $("token").value.trim()));
 
@@ -198,16 +199,17 @@
     const box = $("list");
     box.innerHTML = "<div class='empty'>讀取中…</div>";
     if (!token) { box.innerHTML = "<div class='empty err'>請先輸入 ADMIN_TOKEN</div>"; return; }
-    let orders;
+    let ordersData;
     try {
       const r = await fetch(api + "/api/orders", { headers: { "x-admin-token": token } });
       if (r.status === 401) throw new Error("Token 錯誤或無權限（401）");
       if (!r.ok) throw new Error("HTTP " + r.status);
-      orders = await r.json();
+      ordersData = await r.json();
     } catch (e) {
       box.innerHTML = "<div class='empty err'>讀取失敗：" + esc(e.message) + "</div>";
       return;
     }
+    orders = ordersData;
     if (!orders || !orders.length) { box.innerHTML = "<div class='empty'>目前沒有訂單</div>"; return; }
     const tok = encodeURIComponent(token);
     box.innerHTML = orders.map((o, idx) => {
