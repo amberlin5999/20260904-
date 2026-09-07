@@ -30,6 +30,11 @@
   .dl { color: #1a6fb0; text-decoration: none; white-space: nowrap; }
   .dl:hover { text-decoration: underline; }
   .zipbtn { display: inline-block; margin-top: 8px; padding: 8px 16px; background: #1a6fb0; color: #fff; border-radius: 7px; text-decoration: none; font-size: 14px; }
+  .pb-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #dde3ea; }
+  .pb-row button { padding: 8px 12px; border: 0; border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 600; color: #fff; }
+  .pb-check { background: #8a6d3b; }
+  .pb-work { background: #2f6f7d; }
+  .pb-qc { background: #5a3f8f; }
   .empty { color: #888; text-align: center; padding: 40px 0; }
   .err { color: #b33; }
 </style>
@@ -56,8 +61,135 @@
   function fmtSize(n) { n = Number(n) || 0; const u = ["B","KB","MB","GB"]; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(n >= 10 || i === 0 ? 0 : 1) + " " + u[i]; }
   function stateCls(s) { return s === "received" ? "red" : (s === "files_uploaded" ? "green" : "gray"); }
   function stateLbl(s) { return s === "received" ? "已收單（尚未傳檔）" : (s === "files_uploaded" ? "檔案已上傳" : s); }
-  function fmtDate(iso) { try { const d = new Date(iso); return d.toLocaleString("zh-TW", { hour12: false }); } catch (e) { return iso; } }
+  function fmtDate(iso, hasTime) { try { const d = new Date(iso); if (isNaN(d)) return iso; return hasTime ? d.toLocaleString("zh-TW", { hour12: false }) : d.toLocaleDateString("zh-TW"); } catch (e) { return iso; } }
   function kv(label, val) { return val === undefined || val === null || String(val).trim() === "" ? "" : `<div><b>${esc(label)}</b> ${esc(val)}</div>`; }
+
+  /* ---- 檔案編號規則（依產品類型前綴） ---- */
+  function getFilePrefix(productType) {
+    const p = String(productType || "");
+    if (p.includes("R to R")) return "DTFR";
+    if (p.includes("A3")) return "DTFA";
+    if (p.includes("紡織") && p.includes("直噴")) return "DTG";
+    if (p.includes("燙金")) return "UVDTFG";     // UV燙金標
+    if (p.includes("水晶標")) return "UVF";       // UV水晶標（一般）
+    if (p.includes("UV") && p.includes("直噴")) return "UVDTO";
+    return "QT";
+  }
+  function fileNumbers(o) {
+    const prefix = getFilePrefix(o.product_type);
+    return (o.files || []).map((_, i) => `${prefix}-${String(i + 1).padStart(3, "0")}`);
+  }
+
+  /* ---- 列印單 ── 以新視窗開啟列印頁 ---- */
+  function openDoc(title, bodyHtml, orderNo) {
+    const w = window.open("", "_blank", "width=980,height=760");
+    if (!w) { alert("無法開啟列印視窗（瀏覽器可能擋了彈出視窗）"); return; }
+    w.document.write(`<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><title>${esc(title)} ${esc(orderNo)}</title><style>
+      @page { size: A4; margin: 14mm; }
+      body { font-family: "Microsoft JhengHei", "Segoe UI", sans-serif; color: #111; font-size: 13px; margin: 0; }
+      .print-bar { position: fixed; top: 0; left: 0; right: 0; background: #0f2537; color: #fff; padding: 10px 16px; display: flex; align-items: center; gap: 12px; z-index: 99; }
+      .print-bar span { flex: 1; }
+      .print-bar button { padding: 8px 18px; border: 0; border-radius: 6px; background: #fff; color: #0f2537; font-weight: 700; cursor: pointer; }
+      .sheet { max-width: 210mm; margin: 0 auto; padding: 20mm 10mm 10mm; }
+      .doc-title { text-align: center; font-size: 24px; font-weight: 700; letter-spacing: 3px; margin: 0 0 2px; }
+      .doc-sub { text-align: center; font-size: 12px; color: #555; margin-bottom: 14px; }
+      table.grid { width: 100%; border-collapse: collapse; margin-bottom: 12px; table-layout: fixed; }
+      table.grid th, table.grid td { border: 1px solid #000; padding: 5px 8px; font-size: 12px; vertical-align: top; word-break: break-all; }
+      table.grid th { background: #ececec; text-align: center; font-weight: 700; }
+      .lbl { background: #f4f4f4; font-weight: 700; text-align: center; width: 18%; }
+      .val { width: 32%; }
+      .sec-h { font-size: 13px; font-weight: 700; margin: 14px 0 6px; border-left: 4px solid #0f2537; padding-left: 8px; }
+      .sig { display: flex; justify-content: space-between; margin-top: 34px; }
+      .sig div { width: 42%; border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 12px; }
+      @media print { .print-bar { display: none; } .sheet { padding: 0; } }
+    </style></head><body>
+    <div class="print-bar"><span>${esc(title)} · ${esc(orderNo)}</span><button onclick="window.print()">列印 / 另存 PDF</button></div>
+    <div class="sheet">${bodyHtml}</div>
+    </body></html>`);
+    w.document.close();
+    w.focus();
+  }
+
+  function pairRows(rows) { // rows: [[label, value], ...] → 列成 label/value 兩欄連續表格
+    const html = rows.map(([l, v]) => `<tr><td class="lbl">${esc(l)}</td><td class="val">${esc(String(v ?? ""))}</td></tr>`).join("");
+    return `<table class="grid"><colgroup><col style="width:20%"><col style="width:30%"><col style="width:20%"><col style="width:30%"></colgroup><tbody>${html}</tbody></table>`;
+  }
+  function orderBase(o) {
+    return [
+      ["訂單編號", o.order_no],
+      ["客戶名稱", o.customer_name],
+      ["下單日期", fmtDate(o.created_at)],
+      ["交貨日", o.due_date],
+    ];
+  }
+
+  /* 1. 檔案確認單（印前管理檢查檔案及尺寸） */
+  function printCheck(o) {
+    const files = o.files || [];
+    const fdRows = files.map((f, i) =>
+      `<tr><td style="text-align:center;width:6%">${i + 1}</td><td>${esc(f.name)}</td><td style="text-align:center;width:14%">${f.qty || 1}</td><td style="text-align:center;width:10%">${esc(o.size || "")}</td><td></td></tr>`)
+      .join("");
+    const body = `
+      <div class="doc-title">檔案確認單</div>
+      <div class="doc-sub">數倍DTF 數位印刷 · 印前管理</div>
+      ${pairRows([...orderBase(o), ["產品類型", o.product_type], ["材質", o.material]])}
+      <div class="sec-h">檔案清單（請確認檔案內容、尺寸及數量）</div>
+      <table class="grid">
+        <colgroup><col style="width:6%"><col style="width:45%"><col style="width:14%"><col style="width:10%"><col style="width:25%"></colgroup>
+        <tr><th>序</th><th>原始檔名</th><th>數量</th><th>尺寸</th><th>檢核結果</th></tr>
+        ${fdRows || "<tr><td colspan='5' style='text-align:center'>無檔案</td></tr>"}
+      </table>
+      <div class="sec-h">後加工需求</div><div style="min-height:22px">${esc(o.finish || "")}</div>
+      <div class="sec-h">備註 / 特殊要求</div><div style="min-height:22px">${esc(o.notes || "")}</div>
+      <div class="sig"><div>檢查員簽名</div><div>覆核 / 日期</div></div>`;
+    openDoc("檔案確認單", body, o.order_no);
+  }
+
+  /* 2. 派工單（附重新命名的檔案編號） */
+  function printWork(o) {
+    const files = o.files || [];
+    const nums = fileNumbers(o);
+    const fdRows = files.map((f, i) =>
+      `<tr><td style="text-align:center;width:6%">${i + 1}</td><td style="text-align:center;width:20%;font-weight:700">${esc(nums[i])}</td><td>${esc(f.name)}</td><td style="text-align:center;width:14%">${f.qty || 1}</td><td style="text-align:center;width:10%">${esc(o.size || "")}</td></tr>`)
+      .join("");
+    const body = `
+      <div class="doc-title">派工單</div>
+      <div class="doc-sub">數倍DTF 數位印刷 · 生產工單</div>
+      ${pairRows([...orderBase(o), ["產品類型", o.product_type], ["材質", o.material]])}
+      <div class="sec-h">工作內容（檔案編號為重新命名後之生產編號）</div>
+      <table class="grid">
+        <colgroup><col style="width:6%"><col style="width:20%"><col style="width:40%"><col style="width:14%"><col style="width:10%"></colgroup>
+        <tr><th>序</th><th>檔案編號</th><th>原始檔名</th><th>數量</th><th>尺寸</th></tr>
+        ${fdRows || "<tr><td colspan='5' style='text-align:center'>無檔案</td></tr>"}
+      </table>
+      <div class="sec-h">後加工需求</div><div style="min-height:22px">${esc(o.finish || "")}</div>
+      <div class="sec-h">備註 / 特殊要求</div><div style="min-height:22px">${esc(o.notes || "")}</div>
+      <div class="sig"><div>承辦人</div><div>完成簽收 / 日期</div></div>`;
+    openDoc("派工單", body, o.order_no);
+  }
+
+  /* 3. 品管確認單 */
+  function printQc(o) {
+    const totalQty = (o.files || []).reduce((s, f) => s + (Number(f.qty) || 0), 0) || o.quantity || 0;
+    const body = `
+      <div class="doc-title">品管確認單</div>
+      <div class="doc-sub">數倍DTF 數位印刷 · 品質檢驗</div>
+      ${pairRows([...orderBase(o), ["印製數量", `${o.quantity || totalQty} ${o.unit || ""}`], ["材質", o.material]])}
+      <div class="sec-h">檢驗項目</div>
+      <table class="grid">
+        <colgroup><col style="width:34%"><col style="width:22%"><col style="width:22%"><col style="width:22%"></colgroup>
+        <tr><th>檢驗項目</th><th>合格</th><th>不合格</th><th>備註</th></tr>
+        <tr><td>尺寸 / 出血正確</td><td style="height:26px"></td><td></td><td></td></tr>
+        <tr><td>色彩 / 對色</td><td style="height:26px"></td><td></td><td></td></tr>
+        <tr><td>材質正確</td><td style="height:26px"></td><td></td><td></td></tr>
+        <tr><td>數量正確</td><td style="height:26px"></td><td></td><td></td></tr>
+        <tr><td>外觀（髒污 / 刮傷 / 殘膠）</td><td style="height:26px"></td><td></td><td></td></tr>
+      </table>
+      <div class="sec-h">後加工需求</div><div style="min-height:22px">${esc(o.finish || "")}</div>
+      <div class="sec-h">備註 / 特殊要求</div><div style="min-height:22px">${esc(o.notes || "")}</div>
+      <div class="sig"><div>品檢員</div><div>覆核 / 日期</div></div>`;
+    openDoc("品管確認單", body, o.order_no);
+  }
 
   async function load() {
     const api = $("api").value.trim().replace(/\/+$/, "");
@@ -78,13 +210,13 @@
     }
     if (!orders || !orders.length) { box.innerHTML = "<div class='empty'>目前沒有訂單</div>"; return; }
     const tok = encodeURIComponent(token);
-    box.innerHTML = orders.map(o => {
+    box.innerHTML = orders.map((o, idx) => {
       const files = o.files || [];
       const totalQty = files.reduce((s, f) => s + (Number(f.qty) || 0), 0);
       const logo = o.logistics_method;
       let addr = "";
       if (String(logo).includes("門市") || String(logo).includes("超商") || String(logo).includes("ezShip")) {
-        addr = kv("門市", o.st_name) + kv("門市代碼", o.st_code) + kv("門市地址", o.st_addr);
+        addr = kv("門市", o.store_name || o.st_name) + kv("門市代碼", o.st_code) + kv("門市地址", o.st_addr);
       } else {
         addr = kv("收件人", o.recipient_name || o.rv_name) + kv("收件電話", o.recipient_phone || o.rv_phone)
              + kv("收件地址", o.recipient_address || o.rv_addr || o.rv_address);
@@ -99,29 +231,34 @@
           <span class="st ${stateCls(o.status)}">${esc(stateLbl(o.status))}</span>
         </div>
         <div class="meta">
-          ${kv("下單時間", fmtDate(o.created_at))}
+          ${kv("下單時間", fmtDate(o.created_at, true))}
           ${kv("委製人", o.customer_name)}
           ${kv("聯絡人", o.contact_name)}
           ${kv("手機", o.phone)}
+          ${kv("統編", o.tax_id)}
           ${kv("LINE ID", o.line_id)}
           ${kv("產品類型", o.product_type)}
           ${kv("數量", o.quantity)}
-          ${kv("計價單位", o.billing_unit)}
-          ${kv("尺寸/規格", o.product_size || o.size)}
-          ${kv("材質", o.material_spec || o.material)}
-          ${kv("後加工", o.back_process || o.post_process)}
-          ${kv("緊急程度", o.urgent)}
-          ${kv("交貨日", o.delivery_date)}
+          ${kv("計價單位", o.unit)}
+          ${kv("尺寸", o.size)}
+          ${kv("材質", o.material)}
+          ${kv("後加工", o.finish)}
+          ${kv("緊急程度", o.priority)}
+          ${kv("交貨日", o.due_date)}
           ${kv("物流", o.logistics_method)}
           ${addr}
           ${kv("順豐運單號", (o.sf && (o.sf.waybill_no || "")) || "")}
-          ${kv("特殊要求", o.special_req)}
-          ${kv("備註", o.remark)}
+          ${kv("備註", o.notes)}
         </div>
         <div class="files">
           <div style="font-weight:600;margin-bottom:4px">檔案（${files.length} 個 · 共 ${totalQty} 次印製）</div>
           ${fileRows || "<div style='color:#999;font-size:13px'>無檔案</div>"}
           ${files.length ? `<a class="zipbtn" href="${api}/api/orders/${o.order_no}/download?token=${tok}">↓ 整包 ZIP 一次下載</a>` : ""}
+        </div>
+        <div class="pb-row">
+          <button class="pb-check" onclick="printCheck(orders[${idx}])">R 檔案確認單</button>
+          <button class="pb-work" onclick="printWork(orders[${idx}])">W 派工單</button>
+          <button class="pb-qc" onclick="printQc(orders[${idx}])">QC 品管確認單</button>
         </div>
       </div>`;
     }).join("");
