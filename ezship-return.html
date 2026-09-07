@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>門市選擇完成</title>
+<style>
+  html, body { min-height: 100%; }
+  body {
+    font-family: "Helvetica Neue", Arial, "Microsoft JhengHei", sans-serif;
+    margin: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #f6f7f9; color: #334155; text-align: center;
+  }
+  .box { padding: 24px; font-size: 15px; line-height: 1.7; }
+  .ok { font-size: 40px; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="ok">&#10003;</div>
+    <div>門市已選擇完成，此視窗即將自動關閉。</div>
+    <div>若未自動關閉，請手動關閉並回到下單頁面。</div>
+  </div>
+  <script>
+    (function () {
+      // ezShip 參數版電子地圖回傳的門市資料
+      var p = new URLSearchParams(location.search);
+      var store = {
+        cate: p.get("stCate") || "",  // TOK=OK / TLF=萊爾富 / TFM=全家
+        code: p.get("stCode") || "",  // 網站串接專用門市代碼
+        name: p.get("stName") || "",
+        addr: p.get("stAddr") || "",
+        tel: p.get("stTel") || ""
+      };
+      if (store.code) {
+        // 存到 localStorage（與下單頁同網域），主視窗輪詢取用
+        try { localStorage.setItem("ezship_store_pending", JSON.stringify(store)); } catch (e) {}
+        // postMessage 直接通知開啟此視窗的下單頁
+        if (window.opener) {
+          setTimeout(function () {
+            try { window.opener.postMessage({ type: "EZShipStoreSelected", store: store }, "*"); } catch (e) {}
+          }, 100);
+        }
+      }
+      setTimeout(function () { window.close(); }, 400);
+    })();
+  </script>
+</body>
+</html>

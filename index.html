@@ -191,8 +191,15 @@
           <div id="storeField" hidden>
             <label class="field">
               <span>取貨門市 <em>*</em></span>
-              <input name="store_name" placeholder="例：7-11 新復興門市（可貼店號）" />
-              <div class="hint small">將串接台灣便利配門市查詢 API，目前先手動填寫</div>
+              <div class="store-picker">
+                <input name="store_name" id="storeName" readonly placeholder="點「選擇門市」搜尋" />
+                <button type="button" id="storePickBtn" class="btn ghost pick">選擇門市</button>
+              </div>
+              <input type="hidden" name="st_cate" id="stCate" />
+              <input type="hidden" name="st_code" id="stCode" />
+              <input type="hidden" name="st_addr" id="stAddr" />
+              <input type="hidden" name="st_tel" id="stTel" />
+              <div class="hint small" id="storeAddr">點「選擇門市」連結台灣便利配電子地圖</div>
             </label>
           </div>
         </div>

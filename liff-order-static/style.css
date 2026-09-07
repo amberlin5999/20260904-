@@ -120,6 +120,11 @@ body { font-size: 15px; line-height: 1.55; }
 .btn.ghost { background: #fff; color: var(--ink-2); border: 1px solid var(--line); }
 .btn.ghost:hover { border-color: #cbd5e1; }
 
+/* 超商取貨：門市選擇 */
+.store-picker { display: flex; gap: 8px; }
+.store-picker input { flex: 1; min-width: 0; }
+.store-picker .pick { border-color: var(--brand); color: var(--brand); white-space: nowrap; }
+
 /* dropzone */
 .dropzone {
   display: block; border: 2px dashed #cbd5e1; border-radius: var(--radius);

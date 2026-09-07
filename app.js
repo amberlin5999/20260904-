@@ -19,6 +19,8 @@ const CONFIG = {
     return placeholder.startsWith("__") ? "" : placeholder;
   })(),
   MAX_FILE_MB: 200,  // 單一檔案大小上限（MB）
+  // 超商取貨：ezShip（台灣便利配）賣家帳號，需先在 ezShip 開通「網站串接」服務
+  EZSIP_SUID: "",
 };
 
 // 從網址參數覆蓋設定（方便切換環境）
@@ -332,6 +334,69 @@ function syncLogisticsFields() {
 document.addEventListener("change", (e) => {
   if (e.target.id === "logisticsMethod") syncLogisticsFields();
 });
+
+/* ==========================
+ * 超商取貨：門市選擇（ezShip 電子地圖）
+ * 流程：點「選擇門市」→ 開新視窗連到 https://map.ezship.com.tw
+ *   → 消費者選好門市 → ezShip 導回 ezship-return.html
+ *   → 回傳頁把門市資料透過 postMessage + localStorage 交回主視窗
+ * 開新視窗是為了避免整個下單頁被跳走、已填的資料與檔案遺失。
+ * 參考：ezShip 參數版說明（程式碼說明：連結電子地圖）
+ * ========================== */
+function openStoreMap() {
+  if (!CONFIG.EZSIP_SUID) {
+    toast("尚未設定超商取貨帳號（CONFIG.EZSIP_SUID）", true);
+    return;
+  }
+  // 處理序號：ezShip 原值回傳，用來辨識是哪一次選擇
+  const pid = "st" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  localStorage.removeItem("ezship_store_pending");
+  // 回傳頁路徑（和主頁同網域，才能共享 localStorage）
+  const rtURL = location.origin + location.pathname.replace(/[^/]*$/, "") + "ezship-return.html";
+  const url =
+    "https://map.ezship.com.tw/ezship_map_web.jsp?suID=" + encodeURIComponent(CONFIG.EZSIP_SUID) +
+    "&processID=" + encodeURIComponent(pid) +
+    "&rtURL=" + encodeURIComponent(rtURL) +
+    "&webPara=" + encodeURIComponent(pid);
+  const win = window.open(url, "_blank");
+  if (!win) toast("請允許開啟新視窗，才能連結便利配門市地圖", true);
+  // localStorage 輪詢備援（某些環境 postMessage 不可靠）
+  let tries = 0;
+  clearInterval(window._ezshipPoll);
+  window._ezshipPoll = setInterval(() => {
+    tries++;
+    const raw = localStorage.getItem("ezship_store_pending");
+    if (raw) {
+      clearInterval(window._ezshipPoll);
+      localStorage.removeItem("ezship_store_pending");
+      try { applyEzShipStore(JSON.parse(raw)); } catch (err) {
+        toast("門市資料解析失敗，請重試", true);
+      }
+    } else if (tries > 120) {
+      clearInterval(window._ezshipPoll);
+    }
+  }, 500);
+}
+
+// ezShip 回傳門市資料，填入表單
+function applyEzShipStore(s) {
+  if (!s || !s.code) { toast("門市選擇失敗，請重試", true); return; }
+  document.getElementById("storeName").value = s.name + "（" + s.cate + " " + s.code + "）";
+  document.getElementById("stCate").value = s.cate || "";
+  document.getElementById("stCode").value = s.code || "";
+  document.getElementById("stAddr").value = s.addr || "";
+  document.getElementById("stTel").value = s.tel || "";
+  const hint = document.getElementById("storeAddr");
+  if (hint) hint.textContent = s.addr || "已選擇門市";
+  toast("已選擇門市：" + s.name);
+}
+
+// 接收 ezship-return.html 的 postMessage
+window.addEventListener("message", (e) => {
+  if (e.data && e.data.type === "EZShipStoreSelected") applyEzShipStore(e.data.store);
+});
+
+document.getElementById("storePickBtn").addEventListener("click", openStoreMap);
 
 /* ==========================
  * 檔案上傳區塊
