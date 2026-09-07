@@ -45,6 +45,11 @@
   .conf-table input { width: 90px; padding: 4px 6px; border: 1px solid #b9cfb4; border-radius: 5px; font-size: 13px; }
   .conf-total td { background: #edf5ea; font-weight: 700; text-align: right; }
   .conf-total td:first-child { text-align: right; }
+  .conf-foot { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 8px; font-size: 13px; }
+  .conf-foot input { width: 90px; padding: 4px 6px; border: 1px solid #b9cfb4; border-radius: 5px; font-size: 13px; }
+  .conf-foot b { font-size: 16px; }
+  .warn { color: #c0392b; font-weight: 700; }
+  .warn-note { color: #c0392b; background: #fdecea; border: 1px solid #f0b8b2; padding: 3px 8px; border-radius: 5px; }
   .empty { color: #888; text-align: center; padding: 40px 0; }
   .err { color: #b33; }
 </style>
@@ -95,7 +100,13 @@
 
   /* ---- 試算表：長度/單價的保存與計算 ---- */
   function readConf() { try { return JSON.parse(localStorage.getItem("confirm_data") || "{}"); } catch (e) { return {}; } }
-  function saveConf(no, arr) { const d = readConf(); d[no] = arr; localStorage.setItem("confirm_data", JSON.stringify(d)); }
+  function saveConf(no, obj) { const d = readConf(); d[no] = obj; localStorage.setItem("confirm_data", JSON.stringify(d)); }
+  function confFor(no) {
+    const d = readConf()[no];
+    if (!d) return { rows: [], price: 0 };
+    if (Array.isArray(d)) return { rows: d.map(x => ({ len: Number(x.len) || 0 })), price: 0 };  // 舊格式相容
+    return d;
+  }
   function parseDim(s) {
     const m = String(s || "").match(/(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)/);
     return m ? [parseFloat(m[1]), parseFloat(m[2])] : [null, null];
@@ -103,28 +114,20 @@
   function recalcBlock(no) {
     const block = document.querySelector(`[data-cblock="${no}"]`);
     if (!block) return;
-    const saved = [];
-    let sumLen = 0, sumAmt = 0;
-    block.querySelectorAll("tr").forEach(tr => {
-      const idx = tr.getAttribute("data-idx");
-      if (idx === null) return;
-      const lenInp = tr.querySelector(".c-len");
-      const priceInp = tr.querySelector(".c-price");
-      const amtEl = tr.querySelector(".c-amt");
-      const qty = Number(tr.getAttribute("data-qty")) || 1;
-      const len = parseFloat(lenInp.value) || 0;
-      const price = parseFloat(priceInp.value) || 0;
-      const amt = len > 0 && price > 0 ? qty * len * price : 0;
-      amtEl.textContent = fmtMoney(amt);
-      sumLen += len * qty;
-      sumAmt += amt;
-      saved.push({ len, price });
+    const savedRows = [];
+    let totalLen = 0;
+    block.querySelectorAll("tr[data-i]").forEach(tr => {
+      const len = parseFloat(tr.querySelector(".c-len").value) || 0;
+      totalLen += len;
+      savedRows.push({ len });
     });
+    const price = parseFloat(block.querySelector(".c-price").value) || 0;
+    const fee = totalLen > 0 && price > 0 ? totalLen * price : 0;
     const tl = document.getElementById("tot-len-" + no);
-    const ta = document.getElementById("tot-amt-" + no);
-    if (tl) tl.textContent = fmtDec(sumLen);
-    if (ta) ta.textContent = fmtMoney(sumAmt);
-    saveConf(no, saved);
+    const fe = document.getElementById("fee-" + no);
+    if (tl) tl.textContent = totalLen ? fmtDec(totalLen) + " m" : "";
+    if (fe) fe.textContent = fmtMoney(fee);
+    saveConf(no, { rows: savedRows, price });
   }
 
   /* ---- XLSX 產生器（STORE zip + Excel OpenXML，不需任何套件） ---- */
@@ -206,22 +209,21 @@
   }
 
   /* ---- 檔案確認單 XLSX 匯出（含回填的長度與單價） ---- */
-  function exportConfirmXlsx(o) {
-    const conf = readConf()[o.order_no] || [];
+function exportConfirmXlsx(o) {
+    const conf = confFor(o.order_no);
     const files = o.files || [];
+    const [w1, l1] = parseDim(o.size);
     const rows = files.map((f, i) => {
-      const c = conf[i] || {};
-      const [a, b] = parseDim(o.size);
-      const qty = f.qty || 1;
-      const len = Number(c.len) || 0;
-      const price = Number(c.price) || 0;
-      const amt = len > 0 && price > 0 ? qty * len * price : 0;
-      return [o.order_no, o.customer_name, fmtDate(o.created_at), o.product_type, i + 1, f.name, qty, a, b, len, price, amt];
+      const len = Number(conf.rows[i]?.len) || (Number(l1) || 0);
+      return [o.order_no, o.customer_name, fmtDate(o.created_at), o.product_type, i + 1, f.name, f.qty || 1, w1, len];
     });
-    let sumAmt = 0, sumLen = 0;
-    rows.forEach(r => { sumAmt += Number(r[11]) || 0; sumLen += (Number(r[9]) || 0) * (Number(r[6]) || 1); });
-    if (rows.length) rows.push(["合計", "", "", "", "", "", "", "", "", sumLen, "", sumAmt]);
-    const headers = ["訂單編號","客戶名稱","下單日期","產品類型","序號","圖檔","數量","尺寸值1(mm)","尺寸值2(mm)","檔案長度(m)","單價(NT$/m)","金額(NT$)"];
+    const totalLen = (conf.rows || []).reduce((s, r, i) => s + (Number(r.len) || (Number(l1) || 0)), 0);
+    if (rows.length) {
+      rows.push(["合計總長度(m)", "", "", "", "", "", "", "", totalLen]);
+      rows.push(["單價(NT$/m)", "", "", "", "", "", "", "", Number(conf.price) || 0]);
+      rows.push(["費用(NT$)", "", "", "", "", "", "", "", (totalLen && conf.price) ? totalLen * Number(conf.price) : 0]);
+    }
+    const headers = ["訂單編號","客戶名稱","下單日期","產品類型","序號","圖檔","數量","寬(mm)","長度(m)"];
     const bytes = buildXlsx("檔案確認單", headers, rows);
     downloadBytes(bytes, `檔案確認單_${o.order_no}.xlsx`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   }
@@ -311,39 +313,43 @@
   }
 
   function confirmSection(o, idx) {
-    const saved = (readConf()[o.order_no] || []);
+    const conf = confFor(o.order_no);
     const isDtfr = getFilePrefix(o.product_type) === "DTFR";
     const files = o.files || [];
-    const [a1, a2] = parseDim(o.size);
+    const [w1, l1] = parseDim(o.size);
+    const width = Number(w1) || 0;
     const rowsHtml = files.map((f, i) => {
-      const sv = saved[i] || {};
-      const qty = f.qty || 1;
-      const amt = (sv.len > 0 && sv.price > 0) ? qty * sv.len * sv.price : 0;
-      return `<tr data-idx="${i}" data-qty="${qty}" data-o="${o.order_no}">
+      const len = Number(conf.rows[i]?.len) || (Number(l1) || 0);
+      return `<tr data-i="${i}">
         <td style="text-align:center">${i + 1}</td>
         <td>${esc(f.name)}</td>
-        <td style="text-align:center">${qty}</td>
-        <td style="text-align:center">${a1 ?? ""}</td>
-        <td style="text-align:center">${a2 ?? ""}</td>
-        <td><input class="c-len" type="number" min="0" step="0.01" value="${esc(sv.len || "")}" placeholder="m"></td>
-        <td><input class="c-price" type="number" min="0" step="0.1" value="${esc(sv.price || "")}" placeholder="NT$/m"></td>
-        <td class="c-amt" style="text-align:right">${fmtMoney(amt)}</td>
+        <td style="text-align:center">${f.qty || 1}</td>
+        <td style="text-align:center" class="${width > 572 ? "warn" : ""}" title="${width > 572 ? "寬度超過 572mm" : ""}">${w1 ?? ""}${width > 572 ? " ⚠" : ""}</td>
+        <td><input class="c-len" type="number" min="0" step="0.01" value="${esc(len || "")}" placeholder="m"></td>
       </tr>`;
     }).join("");
-    let sumLen = 0, sumAmt = 0;
-    files.forEach((f, i) => { const sv = saved[i] || {}; sumLen += (Number(sv.len) || 0) * (f.qty || 1); sumAmt += (Number(sv.len) > 0 && Number(sv.price) > 0) ? (f.qty || 1) * Number(sv.len) * Number(sv.price) : 0; });
+    const totalLen = (conf.rows || []).reduce((s, r) => s + (Number(r.len) || 0), 0);
+    const fee = totalLen > 0 && Number(conf.price) > 0 ? totalLen * Number(conf.price) : 0;
     return `
       <div class="confirm" data-cblock="${o.order_no}">
         <div class="confirm-head">
-          <span style="font-weight:600">檔案確認單（試算表）· 檢查後回填圖檔長度，金額自動帶出</span>
+          <span style="font-weight:600">檔案確認單（試算表）· 合計總長度 × 單價 = 費用</span>
           ${isDtfr ? `<span class="dtfr-note">▲ DTF R to R 以圖檔長度計價</span>` : ""}
           <button class="pb-xls" data-action="xls" data-idx="${idx}">↓ 匯出 XLSX</button>
         </div>
         <table class="conf-table">
-          <tr><th>序</th><th>圖檔</th><th>數量</th><th>尺寸值1(mm)</th><th>尺寸值2(mm)</th><th>檔案長度(m)</th><th>單價(NT$/m)</th><th>金額(NT$)</th></tr>
-          ${rowsHtml || "<tr><td colspan='8' style='text-align:center'>無檔案</td></tr>"}
-          <tr class="conf-total"><td colspan="5">合計</td><td id="tot-len-${o.order_no}">${fmtDec(sumLen)}</td><td></td><td id="tot-amt-${o.order_no}">${fmtMoney(sumAmt)}</td></tr>
+          <tr><th>序</th><th>圖檔</th><th>數量</th><th>寬(mm)</th><th>長度(m)</th></tr>
+          ${rowsHtml || "<tr><td colspan='5' style='text-align:center'>無檔案</td></tr>"}
+          <tr class="conf-total">
+            <td colspan="4">合計總長度</td>
+            <td id="tot-len-${o.order_no}">${totalLen ? fmtDec(totalLen) + " m" : ""}</td>
+          </tr>
         </table>
+        <div class="conf-foot">
+          ${width > 572 ? `<span class="warn-note">⚠ 寬度 ${width}mm，不得超過 572mm，請與客戶確認</span>` : ""}
+          <span>單價：<input class="c-price" type="number" min="0" step="0.01" value="${esc(conf.price || "")}" placeholder="NT$/m"> NT$/m</span>
+          <span>費用：<b id="fee-${o.order_no}" style="color:#2e7d46">${fmtMoney(fee)}</b> NT$</span>
+        </div>
       </div>`;
   }
 
@@ -420,9 +426,12 @@
       </div>`;
     }).join("");
 
-    // 事件委派：試算表輸入即重算；匯出 XLSX
+    // 事件繫結：長度/單價輸入即重算；匯出 XLSX
     box.querySelectorAll(".c-len, .c-price").forEach(inp => {
-      inp.addEventListener("input", () => recalcBlock(inp.closest("tr").getAttribute("data-o")));
+      inp.addEventListener("input", () => {
+        const b = inp.closest("[data-cblock]");
+        if (b) recalcBlock(b.getAttribute("data-cblock"));
+      });
     });
     box.querySelectorAll("[data-action='xls']").forEach(btn => {
       btn.addEventListener("click", () => exportConfirmXlsx(orders[Number(btn.getAttribute("data-idx"))]));
