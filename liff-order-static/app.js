@@ -21,7 +21,7 @@ const CONFIG = {
   MAX_FILE_MB: 200,  // 單一檔案大小上限（MB）
   MAX_FILE_COUNT: 40,  // 單筆訂單檔案數量上限
   // 超商取貨：ezShip（台灣便利配）賣家帳號，需先在 ezShip 開通「網站串接」服務
-  EZSIP_SUID: "",
+  EZSIP_SUID: "aceeprint@gmail.com",
 };
 
 // 從網址參數覆蓋設定（方便切換環境）
