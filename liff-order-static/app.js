@@ -15,7 +15,7 @@ const CONFIG = {
   //   - 正式站後端由 pplx 平台代管（可跨網域呼叫、有持久磁碟存訂單與上傳檔）
   //   - 網址參數 ?api=https://... 可臨時覆蓋
   API_BASE: "https://aceeprint.pplx.app/port/3000",
-  MAX_FILE_MB: 100,  // 單一檔案大小上限（MB）
+  MAX_FILE_MB: 50,  // 單一檔案大小上限（MB）；Supabase 免費版單檔上限 50MB
   MAX_FILE_COUNT: 40,  // 單筆訂單檔案數量上限
   // 超商取貨：ezShip（台灣便利配）賣家帳號，需先在 ezShip 開通「網站串接」服務
   EZSIP_SUID: "aceeprint@gmail.com",
