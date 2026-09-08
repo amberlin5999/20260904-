@@ -1,0 +1,20 @@
+{
+  "name": "shubei-liff-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute shubei-orders --remote --file=./schema.sql",
+    "db:init:local": "wrangler d1 execute shubei-orders --local --file=./schema.sql",
+    "r2:create": "wrangler r2 bucket create shubei-orders-files"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "workerd@1.20260907.1": true
+  }
+}

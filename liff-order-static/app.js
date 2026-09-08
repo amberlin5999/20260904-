@@ -11,11 +11,10 @@
 const CONFIG = {
   // TODO：申請 LIFF 後填入預設 LIFF_ID，或直接用 ?liffId= 傳入
   LIFF_ID: "",
-  // 後端接收訂單 API；
-  //   - 正式站後端由 pplx 平台代管（可跨網域呼叫、有持久磁碟存訂單與上傳檔）
-  //   - 網址參數 ?api=https://... 可臨時覆蓋
-  API_BASE: "https://aceeprint.pplx.app/port/3000",
-  MAX_FILE_MB: 50,  // 單一檔案大小上限（MB）；Supabase 免費版單檔上限 50MB
+  // 後端接收訂單 API（Cloudflare Workers：D1 存訂單、R2 存印刷檔）
+  // 網址參數 ?api=https://... 可臨時覆蓋
+  API_BASE: "https://shubei-liff-order.shubei-liff-worker.workers.dev",
+  MAX_FILE_MB: 50,  // 單一檔案大小上限（MB）；與後端 MAX_FILE_MB 一致
   MAX_FILE_COUNT: 40,  // 單筆訂單檔案數量上限
   // 超商取貨：ezShip（台灣便利配）賣家帳號，需先在 ezShip 開通「網站串接」服務
   EZSIP_SUID: "aceeprint@gmail.com",
@@ -684,7 +683,8 @@ async function postJSON(url, data) {
 
 /**
  * 上傳單一檔案到後端（使用 XMLHttpRequest 以支援進度回報）
- * 同時把該檔案的印製數量（qty）一起送出
+ * Cloudflare Workers 不接受 multipart，直接以 raw body 送上傳，
+ * 檔名走 X-File-Name 表頭（URI 編碼）、印製數量走 X-File-Qty
  * @param {string}   orderNo   - 訂單編號
  * @param {object}   item      - 檔案物件 { file, name, qty, ... }
  * @param {function} onProgress - 進度回呼（參數為 0~100 的百分比）
@@ -693,10 +693,10 @@ async function postJSON(url, data) {
 function uploadFile(orderNo, item, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    const fd = new FormData();
-    fd.append("file", item.file, item.name);
-    fd.append("qty", String(item.qty || 1));
     xhr.open("POST", `${CONFIG.API_BASE}/api/orders/${encodeURIComponent(orderNo)}/files`);
+    xhr.setRequestHeader("Content-Type", item.file.type || "application/octet-stream");
+    xhr.setRequestHeader("X-File-Name", encodeURIComponent(item.name));
+    xhr.setRequestHeader("X-File-Qty", String(item.qty || 1));
     // 上傳進度回報
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
@@ -707,7 +707,7 @@ function uploadFile(orderNo, item, onProgress) {
       } else reject(new Error(`檔案上傳失敗 (${xhr.status})`));
     };
     xhr.onerror = () => reject(new Error("網路錯誤，檔案上傳失敗"));
-    xhr.send(fd);
+    xhr.send(item.file);
   });
 }
 

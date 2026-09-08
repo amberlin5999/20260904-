@@ -1,0 +1,20 @@
+name = "shubei-liff-order"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+[vars]
+ADMIN_TOKEN = "MyW691xMzwJ2WaaKE7Bn9aBjTuceHQFG"
+MAX_FILE_MB = "50"
+ZIP_MAX_MB = "20"
+
+# 前端網域；要暫時允許本機測試時，加進 CORS_ORIGINS
+CORS_ORIGINS = "https://aceeprint.vercel.app"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "shubei-orders"
+database_id = "b79351fa-9cb5-429b-a490-0add01f40b71"
+
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "shubei-orders-files"

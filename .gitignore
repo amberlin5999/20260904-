@@ -4,3 +4,4 @@ orders.json
 *.zip
 *.pdf
 .env
+.wrangler/
