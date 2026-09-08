@@ -9,8 +9,8 @@
  * 全域設定
  * ========================== */
 const CONFIG = {
-  // TODO：申請 LIFF 後填入預設 LIFF_ID，或直接用 ?liffId= 傳入
-  LIFF_ID: "",
+  // LINE LIFF App ID（LINE Developers 主控台建立；也可被 ?liffId= 網址參數覆蓋）
+  LIFF_ID: "2011509391-nPhkZAro",
   // 後端接收訂單 API（Cloudflare Workers：D1 存訂單、R2 存印刷檔）
   // 網址參數 ?api=https://... 可臨時覆蓋
   API_BASE: "https://shubei-liff-order.shubei-liff-worker.workers.dev",
