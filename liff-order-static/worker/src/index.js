@@ -35,6 +35,23 @@ function forbid(c) {
   return reply({ ok: false, error: "未授權（需要 ADMIN_TOKEN）" }, 401, c);
 }
 
+// LINE Messaging API 簽章驗證：HMAC-SHA256(Channel Secret, body) base64 與 X-Line-Signature 比較
+// 未設定 CHANNEL_SECRET（如本機開發）時跳過驗證
+async function lineSignatureOk(request, env, bodyText) {
+  const secret = env.CHANNEL_SECRET;
+  if (!secret) return true;
+  const sig = (request.headers.get("X-Line-Signature") || "").trim();
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(bodyText));
+  const expect = btoa(String.fromCharCode(...new Uint8Array(mac)));
+  if (expect.length !== sig.length) return false;
+  let d = 0;
+  for (let i = 0; i < sig.length; i++) d |= expect.charCodeAt(i) ^ sig.charCodeAt(i);
+  return d === 0;
+}
+
 function isAdmin(request, env) {
   const token = env.ADMIN_TOKEN || "";
   if (!token) return false;
@@ -347,7 +364,9 @@ export default {
     if (m === "GET" && p === "/api/health") {
       data = { ok: true }; status = 200;
     } else if (m === "POST" && p === "/webhook/line") {
-      await request.text();   // 消耗 body；LINE 驗證與事件推送只需回 200
+      const bodyText = await request.text();
+      if (!(await lineSignatureOk(request, env, bodyText)))
+        return reply({ ok: false, error: "簽章驗證失敗" }, 401, c);
       data = { ok: true }; status = 200;
     } else if (m === "POST" && p === "/api/orders") {
       [data, status] = await createOrder(request, env);
