@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>訂單後台・數倍DTF</title>
+<title>訂單後台 Aceeprint 愛色智能印刷</title>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; background: #f4f6f9; color: #222; }
@@ -55,7 +55,7 @@
 </style>
 </head>
 <body>
-<header><b>訂單後台</b><span style="opacity:.7">數倍DTF</span></header>
+<header><b>訂單後台</b><span style="opacity:.7">Aceeprint 愛色智能印刷</span></header>
 <div class="wrap">
   <div class="bar">
     <input id="api" placeholder="後端網址" value="https://shubei-liff-order.shubei-liff-worker.workers.dev">
@@ -310,7 +310,7 @@ function exportConfirmXlsx(o) {
       .join("");
     const body = `
       <div class="doc-title">派工單</div>
-      <div class="doc-sub">數倍DTF 數位印刷 · 生產工單</div>
+      <div class="doc-sub">Aceeprint 愛色智能印刷 · 生產工單</div>
       ${pairRows([...orderBase(o), ["產品類型", o.product_type], ["材質", o.material]])}
       <div class="sec-h">工作內容（檔案編號為重新命名後之生產編號）</div>
       <table class="grid">
@@ -327,7 +327,7 @@ function exportConfirmXlsx(o) {
     const totalQty = (o.files || []).reduce((s, f) => s + (Number(f.qty) || 0), 0) || o.quantity || 0;
     const body = `
       <div class="doc-title">品管確認單</div>
-      <div class="doc-sub">數倍DTF 數位印刷 · 品質檢驗</div>
+      <div class="doc-sub">Aceeprint 愛色智能印刷 · 品質檢驗</div>
       ${pairRows([...orderBase(o), ["印製數量", `${o.quantity || totalQty} ${o.unit || ""}`], ["材質", o.material]])}
       <div class="sec-h">檢驗項目</div>
       <table class="grid">
