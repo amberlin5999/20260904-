@@ -77,7 +77,7 @@ body {
   gap: var(--sp-3);
 }
 .brand { display: flex; align-items: center; gap: var(--sp-3); color: var(--accent); }
-.brand .logo { width: 28px; height: 28px; }
+.brand .logo { width: auto; height: 26px; display: block; flex-shrink: 0; }
 .brand-name { color: var(--fg); font-size: 15px; font-weight: 600; line-height: 1.4; letter-spacing: 0.01em; }
 .brand-sub { color: var(--muted); font-size: 12px; line-height: 1.4; }
 .user-chip {
