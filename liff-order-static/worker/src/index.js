@@ -9,6 +9,7 @@
 //   GET  /api/orders/:no/files/:index/download→ 後台單檔下載
 //   POST /api/orders/:no/sf-waybill           → 順豐運單（憑證齊全後啟用）
 //   GET  /api/health                          → 健康檢查
+//   POST /webhook/line                         → LINE Messaging API webhook（200 收受，暫不回應）
 
 const SHARED = {
   "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
@@ -344,6 +345,9 @@ export default {
 
     let data, status, rawRes = false;
     if (m === "GET" && p === "/api/health") {
+      data = { ok: true }; status = 200;
+    } else if (m === "POST" && p === "/webhook/line") {
+      await request.text();   // 消耗 body；LINE 驗證與事件推送只需回 200
       data = { ok: true }; status = 200;
     } else if (m === "POST" && p === "/api/orders") {
       [data, status] = await createOrder(request, env);
