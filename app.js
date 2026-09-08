@@ -14,7 +14,7 @@ const CONFIG = {
   // 後端接收訂單 API（Cloudflare Workers：D1 存訂單、R2 存印刷檔）
   // 網址參數 ?api=https://... 可臨時覆蓋
   API_BASE: "https://shubei-liff-order.shubei-liff-worker.workers.dev",
-  MAX_FILE_MB: 50,  // 單一檔案大小上限（MB）；與後端 MAX_FILE_MB 一致
+  MAX_FILE_MB: 95,  // 單一檔案大小上限（MB）；與後端 MAX_FILE_MB 一致
   MAX_FILE_COUNT: 40,  // 單筆訂單檔案數量上限
   // 超商取貨：ezShip（台灣便利配）賣家帳號，需先在 ezShip 開通「網站串接」服務
   EZSIP_SUID: "aceeprint@gmail.com",
