@@ -324,7 +324,8 @@ export default {
       [data, status] = await createOrder(request, env);
     } else if (m === "GET" && p === "/api/orders") {
       if (!isAdmin(request, env)) return forbid(c);
-      [data, status] = await loadOrders(env);
+      data = await loadOrders(env);
+      status = 200;
     } else if (m === "GET" && p.startsWith("/api/orders/") && p.endsWith("/download") && p.split("/").length === 5) {
       if (!isAdmin(request, env)) return forbid(c);
       const no = p.split("/")[3];
