@@ -363,10 +363,12 @@ export default {
     let data, status, rawRes = false;
     if (m === "GET" && p === "/api/health") {
       data = { ok: true }; status = 200;
-    } else if (m === "POST" && p === "/webhook/line") {
-      const bodyText = await request.text();
-      if (!(await lineSignatureOk(request, env, bodyText)))
-        return reply({ ok: false, error: "簽章驗證失敗" }, 401, c);
+    } else if ((m === "GET" || m === "POST") && p === "/webhook/line") {
+      if (m === "POST") {
+        const bodyText = await request.text();
+        if (!(await lineSignatureOk(request, env, bodyText)))
+          return reply({ ok: false, error: "簽章驗證失敗" }, 401, c);
+      }
       data = { ok: true }; status = 200;
     } else if (m === "POST" && p === "/api/orders") {
       [data, status] = await createOrder(request, env);
