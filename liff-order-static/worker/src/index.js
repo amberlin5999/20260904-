@@ -52,6 +52,16 @@ function sanitizeName(n) {
   );
 }
 
+// 依產品限制可上傳的副檔名（與前台 app.js 保持一致）
+const PRODUCT_FILE_TYPES = {
+  "紡織 - DTF - 60cm R to R": ["png", "ai", "pdf", "psd"],
+  "紡織 - DTF - A3": ["png"],
+  "紡織 - 直噴": ["png"],
+  "UV - 一般水晶標": ["pdf", "ai", "psd"],
+  "UV - 燙金水晶標": ["pdf", "ai", "psd"],
+  "UV - 直噴": ["pdf", "ai", "psd"],
+};
+
 // 訂單編號：YYYYMMDD###（依台灣時區，“當天第幾筆”遞增）
 async function genOrderNo(env) {
   const t = new Date(Date.now() + 8 * 3600 * 1000);
@@ -116,8 +126,8 @@ async function uploadFile(request, env, no) {
   if (contentLength > limit)
     return [{ ok: false, error: `檔案超過 ${maxMb}MB 上限` }, 413];
 
-  const exists = await env.DB.prepare("SELECT 1 FROM orders WHERE order_no = ?").bind(no).first();
-  if (!exists) return [{ ok: false, error: "訂單不存在" }, 404];
+  const orderRow = await env.DB.prepare("SELECT data FROM orders WHERE order_no = ?").bind(no).first();
+  if (!orderRow) return [{ ok: false, error: "訂單不存在" }, 404];
 
   const nameRaw = request.headers.get("x-file-name") || "";
   let name;
@@ -127,6 +137,21 @@ async function uploadFile(request, env, no) {
     name = sanitizeName(nameRaw);
   }
   if (!name) return [{ ok: false, error: "缺少檔名（X-File-Name）" }, 400];
+
+  // 依該訂單的產品類型檢查副檔名是否允許（與前台規則一致）
+  let ptype = "";
+  try {
+    ptype = String((JSON.parse(orderRow.data) || {}).product_type || "");
+  } catch (e) {}
+  const allowed = PRODUCT_FILE_TYPES[ptype];
+  if (allowed) {
+    const ext = "." + (name.split(".").pop() || "").toLowerCase();
+    if (!allowed.includes(ext))
+      return [
+        { ok: false, error: `此產品不接受 ${ext} 格式（僅接受 ${allowed.map((e) => e.toUpperCase()).join(" / ")}）` },
+        400,
+      ];
+  }
   const qty = Number(request.headers.get("x-file-qty") || 1) || 1;
 
   const key = `orders/${no}/01_original/${name}`;

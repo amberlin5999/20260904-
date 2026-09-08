@@ -64,6 +64,47 @@ const PRODUCT_TREE = {
   }
 };
 
+/* ==========================
+ * 依產品限制可上傳的檔類型
+ * 組合格式＼「大類 - 子類 - 規格」，須與 PRODUCT_TREE 一致
+ * ========================== */
+const EXT_LABELS = {
+  ".ai": "AI", ".psd": "PSD", ".pdf": "PDF", ".png": "PNG",
+  ".jpg": "JPG", ".jpeg": "JPG", ".tif": "TIFF", ".tiff": "TIFF",
+  ".svg": "SVG", ".eps": "EPS", ".zip": "ZIP",
+};
+
+const PRODUCT_FILE_TYPES = {
+  "紡織 - DTF - 60cm R to R": [".png", ".ai", ".pdf", ".psd"],
+  "紡織 - DTF - A3": [".png"],
+  "紡織 - 直噴": [".png"],
+  "UV - 一般水晶標": [".pdf", ".ai", ".psd"],
+  "UV - 燙金水晶標": [".pdf", ".ai", ".psd"],
+  "UV - 直噴": [".pdf", ".ai", ".psd"],
+};
+
+// 全部產品共通的可用類型（未選產品或未定義規則時的預設）
+const ALL_FILE_TYPES = [...new Set(Object.values(PRODUCT_FILE_TYPES).flat())];
+
+/** 依目前選擇的產品回傳允許的副檔名清單（未選齊產品 → 全部類型） */
+function currentAllowedExts() {
+  const pt = document.getElementById("productTypeHidden")?.value || "";
+  return PRODUCT_FILE_TYPES[pt] || ALL_FILE_TYPES;
+}
+
+/** 把副檔名清單轉成顯示名稱，例如：["PNG", "AI", "PDF"] */
+function fmtExts(list) {
+  return [...new Set(list)].map((e) => EXT_LABELS[e] || e.slice(1).toUpperCase()).join(" / ");
+}
+
+/** 依產品更新檔案選擇器的 accept 與提示文字 */
+function updateFileTypes() {
+  const ext = currentAllowedExts();
+  fileInput.accept = ext.join(",");
+  const hint = document.getElementById("fileHint");
+  if (hint) hint.textContent = `此產品僅接受 ${fmtExts(ext)}；單檔最大 ${CONFIG.MAX_FILE_MB}MB、一單最多 ${CONFIG.MAX_FILE_COUNT} 個，可一次多選；上傳後可設定每個檔案的印製數量（預設 1）。`;
+}
+
 /** 依目前所選的產品組合，回傳計價單位 */
 function getUnit() {
   const cat = document.getElementById("productCategory")?.value || "";
@@ -110,6 +151,7 @@ function initCascadeSelects() {
     specEl.innerHTML = '<option value="">規格</option>';
     specEl.disabled = true;
     hiddenEl.value = "";
+    updateFileTypes();
 
     const cat = catEl.value;
     // 如果沒選大類，或 tree 中找不到對應資料，則停用子類
@@ -132,6 +174,7 @@ function initCascadeSelects() {
   subEl.addEventListener("change", () => {
     specEl.innerHTML = '<option value="">規格</option>';
     hiddenEl.value = "";
+    updateFileTypes();
     const cat = catEl.value;
     const sub = subEl.value;
     if (!cat || !sub) { specEl.disabled = true; updateProductHidden(); updateUnit(); return; }
@@ -163,6 +206,7 @@ function initCascadeSelects() {
     const spec = specEl.value;
     const parts = [cat, sub, spec].filter(Boolean);
     hiddenEl.value = parts.join(" - ");
+    updateFileTypes();
   }
 }
 
@@ -432,6 +476,13 @@ fileInput.addEventListener("change", (e) => addFiles(e.target.files));
  */
 function addFiles(fileListObj) {
   const arr = Array.from(fileListObj || []);
+  // 需先選擇產品類型，才能依產品過濾檔名格式
+  if (!document.getElementById("productTypeHidden")?.value) {
+    toast("請先選擇產品類型", true);
+    fileInput.value = "";
+    return;
+  }
+  const allowed = currentAllowedExts();
   for (const f of arr) {
     // 檔案數量檢查：單筆訂單最多 MAX_FILE_COUNT 個
     if (state.files.length >= CONFIG.MAX_FILE_COUNT) {
@@ -441,6 +492,12 @@ function addFiles(fileListObj) {
     // 檔案大小檢查
     if (f.size > CONFIG.MAX_FILE_MB * 1024 * 1024) {
       toast(`${f.name} 超過 ${CONFIG.MAX_FILE_MB}MB，未加入`, true);
+      continue;
+    }
+    // 副檔名檢查：此產品僅接受特定格式
+    const ext = "." + (f.name.split(".").pop() || "").toLowerCase();
+    if (!allowed.includes(ext)) {
+      toast(`${f.name} 不是此產品可接受的格式（僅接受 ${fmtExts(allowed)}）`, true);
       continue;
     }
     // 建立檔案物件並加入全域狀態
@@ -750,6 +807,7 @@ function toast(msg, isError) {
  * 程式啟動
  * ========================== */
 initCascadeSelects();  // 初始化產品類型三層連動下拉
+updateFileTypes();     // 依產品初始化檔案格式限制
 updateUnit();          // 初始化計價單位顯示
 initLiff();            // 初始化 LINE LIFF（非 LINE 環境會自動跳過）
 goToStep(1);           // 從第 1 步開始
