@@ -103,6 +103,26 @@ function updateFileTypes() {
   fileInput.accept = ext.join(",");
   const hint = document.getElementById("fileHint");
   if (hint) hint.textContent = `此產品僅接受 ${fmtExts(ext)}；單檔最大 ${CONFIG.MAX_FILE_MB}MB、一單最多 ${CONFIG.MAX_FILE_COUNT} 個，可一次多選；上傳後可設定每個檔案的印製數量（預設 1）。`;
+  sweepFilesByProduct();
+}
+
+/** 產品類型變更時，移除清單中不符合新產品格式的檔案 */
+function sweepFilesByProduct() {
+  const allowed = currentAllowedExts();
+  const keep = [];
+  const dropped = [];
+  for (const item of state.files) {
+    const ext = "." + (item.name.split(".").pop() || "").toLowerCase();
+    (allowed.includes(ext) ? keep : dropped).push(item);
+  }
+  if (!dropped.length) return;
+  state.files = keep;
+  dropped.forEach((item) => {
+    const el = fileList.querySelector(`[data-id="${item.id}"]`);
+    if (el) el.remove();
+  });
+  updateUnit();
+  toast(`已變更產品類型，移除不符合格式的檔案：${dropped.map((f) => f.name).join("、")}`, true);
 }
 
 /** 依目前所選的產品組合，回傳計價單位 */
@@ -656,6 +676,17 @@ document.getElementById("orderForm").addEventListener("submit", async (e) => {
 
   const btn = document.getElementById("submitBtn");
   btn.disabled = true; btn.textContent = "送出中...";
+
+  // 送出前二次檢查：任一檔案格式不符所選產品則中止（避免訂單建到一半失敗）
+  const badFiles = state.files.filter((f) => {
+    const ext = "." + (f.name.split(".").pop() || "").toLowerCase();
+    return !currentAllowedExts().includes(ext);
+  });
+  if (badFiles.length) {
+    btn.disabled = false; btn.textContent = "送出訂單";
+    toast(`以下檔案格式與所選產品不符，請移除後再送出：${badFiles.map((f) => f.name).join("、")}`, true);
+    return;
+  }
 
   try {
     // 組裝訂單資料
