@@ -760,7 +760,14 @@ function uploadFile(orderNo, item, onProgress) {
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try { resolve(JSON.parse(xhr.responseText)); } catch { resolve({ ok: true }); }
-      } else reject(new Error(`檔案上傳失敗 (${xhr.status})`));
+      } else {
+        let detail = "";
+        try {
+          const j = JSON.parse(xhr.responseText);
+          if (j && j.error) detail = j.error;
+        } catch (e) {}
+        reject(new Error(detail ? `檔案上傳失敗：${detail}` : `檔案上傳失敗 (${xhr.status})`));
+      }
     };
     xhr.onerror = () => reject(new Error("網路錯誤，檔案上傳失敗"));
     xhr.send(item.file);
