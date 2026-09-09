@@ -92,6 +92,12 @@ function currentAllowedExts() {
   return PRODUCT_FILE_TYPES[pt] || ALL_FILE_TYPES;
 }
 
+/** 正規化取得副檔名（忽略尾端空白／隱形字元、大小寫） */
+function extOf(name) {
+  const m = String(name).toLowerCase().trim().match(/\.([a-z0-9]{1,20})$/);
+  return m ? "." + m[1] : "";
+}
+
 /** 把副檔名清單轉成顯示名稱，例如：["PNG", "AI", "PDF"] */
 function fmtExts(list) {
   return [...new Set(list)].map((e) => EXT_LABELS[e] || e.slice(1).toUpperCase()).join(" / ");
@@ -112,7 +118,7 @@ function sweepFilesByProduct() {
   const keep = [];
   const dropped = [];
   for (const item of state.files) {
-    const ext = "." + (item.name.split(".").pop() || "").toLowerCase();
+    const ext = extOf(item.name);
     (allowed.includes(ext) ? keep : dropped).push(item);
   }
   if (!dropped.length) return;
@@ -515,8 +521,8 @@ function addFiles(fileListObj) {
       continue;
     }
     // 副檔名檢查：此產品僅接受特定格式
-    const ext = "." + (f.name.split(".").pop() || "").toLowerCase();
-    if (!allowed.includes(ext)) {
+    const ext = extOf(f.name);
+    if (!ext || !allowed.includes(ext)) {
       toast(`${f.name} 不是此產品可接受的格式（僅接受 ${fmtExts(allowed)}）`, true);
       continue;
     }
@@ -679,8 +685,8 @@ document.getElementById("orderForm").addEventListener("submit", async (e) => {
 
   // 送出前二次檢查：任一檔案格式不符所選產品則中止（避免訂單建到一半失敗）
   const badFiles = state.files.filter((f) => {
-    const ext = "." + (f.name.split(".").pop() || "").toLowerCase();
-    return !currentAllowedExts().includes(ext);
+    const ext = extOf(f.name);
+    return !ext || !currentAllowedExts().includes(ext);
   });
   if (badFiles.length) {
     btn.disabled = false; btn.textContent = "送出訂單";

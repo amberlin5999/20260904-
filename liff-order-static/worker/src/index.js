@@ -70,6 +70,12 @@ function sanitizeName(n) {
   );
 }
 
+// 正規化取得副檔名（忽略尾端空白／隱形字元、大小寫）
+function extOf(name) {
+  const m = String(name).toLowerCase().trim().match(/\.([a-z0-9]{1,20})$/);
+  return m ? "." + m[1] : "";
+}
+
 // 依產品限制可上傳的副檔名（與前台 app.js 保持一致）
 const PRODUCT_FILE_TYPES = {
   "紡織 - DTF - 60cm R to R": ["png", "ai", "pdf", "psd"],
@@ -163,8 +169,8 @@ async function uploadFile(request, env, no) {
   } catch (e) {}
   const allowed = PRODUCT_FILE_TYPES[ptype];
   if (allowed) {
-    const ext = "." + (name.split(".").pop() || "").toLowerCase();
-    if (!allowed.includes(ext))
+    const ext = extOf(name);
+    if (ext && !allowed.includes(ext))
       return [
         { ok: false, error: `此產品不接受 ${ext} 格式（僅接受 ${allowed.map((e) => e.toUpperCase()).join(" / ")}）` },
         400,
