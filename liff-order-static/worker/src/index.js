@@ -16,12 +16,68 @@ const SHARED = {
   "Access-Control-Allow-Headers": "Content-Type, x-admin-token, Authorization, X-File-Name, X-File-Qty",
 };
 
+// Rate limiting: sliding window via KV (max 20 requests per minute per IP)
+async function checkRateLimit(env, key, limit = 20, windowMs = 60000) {
+  const now = Date.now();
+  const windowStart = now - windowMs;
+  const kvKey = `ratelimit:${key}`;
+  const data = await env.RATE_LIMIT.get(kvKey, { type: "json" }) || { timestamps: [] };
+  const timestamps = data.timestamps.filter((ts) => ts > windowStart);
+  if (timestamps.length >= limit) {
+    return { allowed: false, retryAfter: Math.ceil((timestamps[0] + windowMs - now) / 1000) };
+  }
+  timestamps.push(now);
+  await env.RATE_LIMIT.put(kvKey, JSON.stringify({ timestamps }), { expirationTtl: 120 });
+  return { allowed: true, remaining: limit - timestamps.length };
+}
+
 function cors(request, env) {
   const origin = request.headers.get("Origin") || "";
   const allow = (env.CORS_ORIGINS || "*").split(",").map((s) => s.trim());
   if (allow.includes("*")) return { ...SHARED, "Access-Control-Allow-Origin": "*" };
   if (allow.includes(origin)) return { ...SHARED, "Access-Control-Allow-Origin": origin };
   return SHARED;
+}
+
+// JWT helpers (Web Crypto API)
+async function jwtSign(payload, secret, expMinutes = 480) {
+  const header = { alg: "HS256", typ: "JWT" };
+  const now = Math.floor(Date.now() / 1000);
+  const claims = { ...payload, iat: now, exp: now + expMinutes * 60 };
+  const enc = (obj) => btoa(JSON.stringify(obj)).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  const unsigned = enc(header) + "." + enc(claims);
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(unsigned));
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  return unsigned + "." + sigB64;
+}
+
+async function jwtVerify(token, secret) {
+  try {
+    const [headerB64, payloadB64, sigB64] = token.split(".");
+    if (!headerB64 || !payloadB64 || !sigB64) return null;
+    const unsigned = headerB64 + "." + payloadB64;
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    const sig = new Uint8Array(atob(sigB64.replace(/-/g, "+").replace(/_/g, "/")).split("").map((c) => c.charCodeAt(0)));
+    const valid = await crypto.subtle.verify("HMAC", key, sig, new TextEncoder().encode(unsigned));
+    if (!valid) return null;
+    const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+// 驗證密碼 (PBKDF2-SHA256)
+async function verifyPassword(password, storedHash) {
+  const [saltB64, hashB64] = storedHash.split(":");
+  if (!saltB64 || !hashB64) return false;
+  const salt = new Uint8Array(atob(saltB64).split("").map((c) => c.charCodeAt(0)));
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const derived = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" }, key, 256);
+  const derivedB64 = btoa(String.fromCharCode(...new Uint8Array(derived)));
+  return derivedB64 === hashB64;
 }
 
 function reply(data, status, hdrs) {
@@ -52,49 +108,87 @@ async function lineSignatureOk(request, env, bodyText) {
   return d === 0;
 }
 
-function isAdmin(request, env) {
-  const token = env.ADMIN_TOKEN || "";
+async function isAdmin(request, env) {
+  const auth = request.headers.get("authorization") || "";
+  let token = auth.replace(/^Bearer\s+/i, "").trim();
+  if (!token) {
+    const url = new URL(request.url);
+    token = url.searchParams.get("token") || "";
+  }
   if (!token) return false;
-  const h = request.headers.get("x-admin-token") || request.headers.get("authorization") || "";
-  const t = h.replace(/^Bearer\s+/i, "").trim();
-  const q = new URL(request.url).searchParams.get("token") || "";
-  return t === token || q === token;
+  const payload = await jwtVerify(token, env.JWT_SECRET);
+  return payload && payload.role === "admin";
 }
 
 function sanitizeName(n) {
   return (
     String(n)
+      .replace(/^\.+/, "")
+      .replace(/\.\.+/g, "_")
       .replace(/[\\/\0]/g, "_")
       .replace(/[\u0000-\u001f]/g, "")
       .slice(0, 200) || "untitled"
   );
 }
 
-// 正規化取得副檔名（忽略尾端空白／隱形字元、大小寫）
+// 正規化取得副檔名（忽略尾端空白／隱形字元、大小寫，限制長度 ≤ 5）
 function extOf(name) {
-  const m = String(name).toLowerCase().trim().match(/\.([a-z0-9]{1,20})$/);
+  const m = String(name).toLowerCase().trim().match(/\.([a-z0-9]{1,5})$/);
   return m ? "." + m[1] : "";
+}
+
+// Magic bytes for allowed file types
+const MAGIC_BYTES = {
+  ".png":  [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  ".pdf":  [0x25, 0x50, 0x44, 0x46],
+  ".ai":   [0x25, 0x50, 0x44, 0x46], // AI files are PDF-based
+  ".psd":  [0x38, 0x42, 0x50, 0x53],
+};
+
+function checkMagicBytes(bytes, ext) {
+  const magic = MAGIC_BYTES[ext];
+  if (!magic) return true; // no validation for unknown ext
+  if (bytes.length < magic.length) return false;
+  for (let i = 0; i < magic.length; i++) {
+    if (bytes[i] !== magic[i]) return false;
+  }
+  return true;
 }
 
 // 依產品限制可上傳的副檔名（與前台 app.js 保持一致）
 const PRODUCT_FILE_TYPES = {
-  "紡織 - DTF - 60cm R to R": ["png", "ai", "pdf", "psd"],
-  "紡織 - DTF - A3": ["png"],
-  "紡織 - 直噴": ["png"],
-  "UV - 一般水晶標": ["pdf", "ai", "psd"],
-  "UV - 燙金水晶標": ["pdf", "ai", "psd"],
-  "UV - 直噴": ["pdf", "ai", "psd"],
+  "紡織 - DTF - 60cm R to R": [".png", ".ai", ".pdf", ".psd"],
+  "紡織 - DTF - A3": [".png"],
+  "紡織 - 直噴": [".png"],
+  "UV - 一般水晶標": [".pdf", ".ai", ".psd"],
+  "UV - 燙金水晶標": [".pdf", ".ai", ".psd"],
+  "UV - 直噴": [".pdf", ".ai", ".psd"],
 };
 
-// 訂單編號：YYYYMMDD###（依台灣時區，“當天第幾筆”遞增）
+// 訂單編號：YYYYMMDD###（依台灣時區，“當天第幾筆”遞增，PK 衝突重試）
 async function genOrderNo(env) {
-  const t = new Date(Date.now() + 8 * 3600 * 1000);
-  const ymd = t.toISOString().slice(0, 10).replace(/-/g, "");
-  const row = await env.DB.prepare("SELECT COUNT(*) AS c FROM orders WHERE order_no LIKE ?")
-    .bind(ymd + "%")
-    .first();
-  const c = Number((row && row.c) || 0) + 1;
-  return ymd + String(c).padStart(3, "0");
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const t = new Date(Date.now() + 8 * 3600 * 1000);
+    const ymd = t.toISOString().slice(0, 10).replace(/-/g, "");
+    const row = await env.DB.prepare("SELECT COUNT(*) AS c FROM orders WHERE order_no LIKE ?")
+      .bind(ymd + "%")
+      .first();
+    const c = Number((row && row.c) || 0) + 1;
+    const orderNo = ymd + String(c).padStart(3, "0");
+    try {
+      await env.DB.prepare("INSERT INTO orders (order_no, status, data, created_at) VALUES (?,?,?,?)")
+        .bind(orderNo, "reserved", "{}", new Date().toISOString())
+        .run();
+      return orderNo;
+    } catch (e) {
+      if (String(e).includes("UNIQUE") || String(e).includes("PRIMARY KEY")) {
+        await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error("訂單編號產生失敗（重試耗盡）");
 }
 
 // 合併 DB 列 + data JSON + 檔案清單 → 與舊版 server.js 的回傳形狀一致
@@ -137,8 +231,8 @@ async function createOrder(request, env) {
     if (!body[k] || !String(body[k]).trim())
       return [{ ok: false, error: `缺少欄位 ${k}` }, 400];
   const order_no = await genOrderNo(env);
-  await env.DB.prepare("INSERT INTO orders (order_no, status, data, created_at) VALUES (?,?,?,?)")
-    .bind(order_no, "received", JSON.stringify(body), new Date().toISOString())
+  await env.DB.prepare("UPDATE orders SET status = ?, data = ?, created_at = ? WHERE order_no = ?")
+    .bind("received", JSON.stringify(body), new Date().toISOString(), order_no)
     .run();
   return [{ ok: true, order_no }, 200];
 }
@@ -178,9 +272,15 @@ async function uploadFile(request, env, no) {
   }
   const qty = Number(request.headers.get("x-file-qty") || 1) || 1;
 
+  const bodyBytes = new Uint8Array(await request.arrayBuffer());
+  const ext = extOf(name);
+  if (ext && !checkMagicBytes(bodyBytes, ext)) {
+    return [{ ok: false, error: `檔案內容與副檔名 ${ext} 不符，疑似偽裝檔案` }, 400];
+  }
+
   const key = `orders/${no}/01_original/${name}`;
   const contentType = request.headers.get("content-type") || "application/octet-stream";
-  await env.R2.put(key, request.body, {
+  await env.R2.put(key, bodyBytes, {
     httpMetadata: {
       contentType,
       contentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
@@ -367,7 +467,24 @@ export default {
     const m = request.method;
 
     let data, status, rawRes = false;
-    if (m === "GET" && p === "/api/health") {
+    if (m === "POST" && p === "/api/admin/login") {
+      let body;
+      try { body = await request.json(); } catch (e) { body = null; }
+      const username = body?.username?.trim();
+      const password = body?.password;
+      if (!username || !password) return reply({ ok: false, error: "請輸入帳號密碼" }, 400, c);
+      if (username !== "admin") return reply({ ok: false, error: "帳號或密碼錯誤" }, 401, c);
+      const hash = env.ADMIN_PASSWORD_HASH;
+      if (!hash || !(await verifyPassword(password, hash))) return reply({ ok: false, error: "帳號或密碼錯誤" }, 401, c);
+      const token = await jwtSign({ role: "admin", user: username }, env.JWT_SECRET, 480);
+      return reply({ ok: true, token }, 200, c);
+    } else if (m === "POST" && p === "/api/admin/logout") {
+      // Stateless JWT，前端清除即可
+      return reply({ ok: true }, 200, c);
+    } else if (m === "GET" && p === "/api/admin/me") {
+      if (!await isAdmin(request, env)) return forbid(c);
+      return reply({ ok: true, user: "admin" }, 200, c);
+    } else if (m === "GET" && p === "/api/health") {
       data = { ok: true }; status = 200;
     } else if ((m === "GET" || m === "POST") && p === "/webhook/line") {
       if (m === "POST") {
@@ -377,6 +494,8 @@ export default {
       }
       data = { ok: true }; status = 200;
     } else if (m === "POST" && p === "/api/orders") {
+      const rl = await checkRateLimit(env, `order:${request.headers.get("cf-connecting-ip") || "unknown"}`);
+      if (!rl.allowed) return reply({ ok: false, error: `請求過於頻繁，請 ${rl.retryAfter} 秒後再試` }, 429, c);
       [data, status] = await createOrder(request, env);
     } else if (m === "GET" && p === "/api/orders") {
       if (!isAdmin(request, env)) return forbid(c);
@@ -397,6 +516,8 @@ export default {
         } else if (m === "POST" && sub[0] === "complete") {
           [data, status] = await completeOrder(request, env, no);
         } else if (m === "POST" && sub[0] === "files") {
+          const rl = await checkRateLimit(env, `upload:${request.headers.get("cf-connecting-ip") || "unknown"}:${no}`, 60, 60000);
+          if (!rl.allowed) return reply({ ok: false, error: `上傳過於頻繁，請 ${rl.retryAfter} 秒後再試` }, 429, c);
           [data, status] = await uploadFile(request, env, no);
         } else if (m === "GET" && sub[0] === "files" && sub[1] !== undefined && sub[2] === "download") {
           if (!isAdmin(request, env)) return forbid(c);

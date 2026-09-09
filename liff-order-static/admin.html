@@ -57,23 +57,73 @@
 <body>
 <header><b>訂單後台</b><span style="opacity:.7">Aceeprint 愛色智能印刷</span></header>
 <div class="wrap">
-  <div class="bar">
+  <div class="bar" id="loginBar">
     <input id="api" placeholder="後端網址" value="https://shubei-liff-order.shubei-liff-worker.workers.dev">
-    <input id="token" type="password" placeholder="ADMIN_TOKEN">
+    <input id="username" placeholder="帳號" value="admin" autocomplete="username">
+    <input id="password" type="password" placeholder="密碼" autocomplete="current-password">
+    <button onclick="login()">登入</button>
+    <div class="hint">預設帳號：admin / 密碼：admin123（請盡快修改）</div>
+  </div>
+  <div class="bar" id="mainBar" hidden>
+    <input id="api2" placeholder="後端網址" value="https://shubei-liff-order.shubei-liff-worker.workers.dev">
     <button onclick="load()">載入訂單</button>
-    <div class="hint">Token 只存在這台瀏覽器的 localStorage。試算表輸入值會自動存在此瀏覽器，下次重新整理仍在。</div>
+    <button onclick="logout()" class="pb-row" style="background:#c0392b">登出</button>
+    <div class="hint">JWT Token 存在 localStorage，重新整理保持登入。點登出清除。</div>
   </div>
   <div id="list"></div>
 </div>
 
 <script>
   const $ = (id) => document.getElementById(id);
-  const KEY = "admin_token";
-  let orders = [];  // 全域訂單快取（按鈕 click 需在這裡讀）
-  $("token").value = localStorage.getItem(KEY) || "";
-  $("token").addEventListener("change", () => localStorage.setItem(KEY, $("token").value.trim()));
+  const TOKEN_KEY = "admin_jwt";
+  let orders = [];
 
-  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+  // 初始化：檢查是否已有 token
+  function initAuth() {
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (token) {
+      $("loginBar").hidden = true;
+      $("mainBar").hidden = false;
+      $("api2").value = $("api").value;
+      load();
+    }
+  }
+
+  async function login() {
+    const api = $("api").value.trim().replace(/\/+$/, "");
+    const username = $("username").value.trim();
+    const password = $("password").value;
+    if (!username || !password) { alert("請輸入帳號密碼"); return; }
+    try {
+      const r = await fetch(api + "/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "登入失敗");
+      localStorage.setItem(TOKEN_KEY, data.token);
+      $("loginBar").hidden = true;
+      $("mainBar").hidden = false;
+      $("api2").value = api;
+      load();
+    } catch (e) { alert("登入失敗：" + e.message); }
+  }
+
+  function logout() {
+    localStorage.removeItem(TOKEN_KEY);
+    $("loginBar").hidden = false;
+    $("mainBar").hidden = true;
+    $("list").innerHTML = "";
+    $("password").value = "";
+  }
+
+  function getAuthHeaders() {
+    const token = localStorage.getItem(TOKEN_KEY);
+    return token ? { "Authorization": "Bearer " + token } : {};
+  }
+
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&", "<":"<", ">":">", '"':""", "'":"'" }[c])); }
   function fmtSize(n) { n = Number(n) || 0; const u = ["B","KB","MB","GB"]; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(n >= 10 || i === 0 ? 0 : 1) + " " + u[i]; }
   function stateCls(s) { return s === "received" ? "red" : (s === "files_uploaded" ? "green" : "gray"); }
   function stateLbl(s) { return s === "received" ? "已收單（尚未傳檔）" : (s === "files_uploaded" ? "檔案已上傳" : s); }
@@ -415,16 +465,13 @@ function exportConfirmXlsx(o) {
   }
 
   async function load() {
-    const api = $("api").value.trim().replace(/\/+$/, "");
-    const token = $("token").value.trim();
-    localStorage.setItem(KEY, token);
+    const api = $("api2").value.trim().replace(/\/+$/, "");
     const box = $("list");
     box.innerHTML = "<div class='empty'>讀取中…</div>";
-    if (!token) { box.innerHTML = "<div class='empty err'>請先輸入 ADMIN_TOKEN</div>"; return; }
     let ordersData;
     try {
-      const r = await fetch(api + "/api/orders", { headers: { "x-admin-token": token } });
-      if (r.status === 401) throw new Error("Token 錯誤或無權限（401）");
+      const r = await fetch(api + "/api/orders", { headers: getAuthHeaders() });
+      if (r.status === 401) { logout(); throw new Error("登入已過期，請重新登入"); }
       if (!r.ok) throw new Error("HTTP " + r.status);
       ordersData = await r.json();
     } catch (e) {
@@ -433,7 +480,6 @@ function exportConfirmXlsx(o) {
     }
     orders = ordersData;
     if (!orders || !orders.length) { box.innerHTML = "<div class='empty'>目前沒有訂單</div>"; return; }
-    const tok = encodeURIComponent(token);
     box.innerHTML = orders.map((o, idx) => {
       const files = o.files || [];
       const totalQty = files.reduce((s, f) => s + (Number(f.qty) || 0), 0);
@@ -447,7 +493,7 @@ function exportConfirmXlsx(o) {
       }
       const fileRows = files.map((f, i) =>
         `<div class="frow"><span class="nm">${esc(f.name)}</span><span class="qty">× ${f.qty || 1} · ${fmtSize(f.size)}</span>` +
-        `<a class="dl" href="${api}/api/orders/${o.order_no}/files/${i}/download?token=${tok}" download>下載</a></div>`
+        `<a class="dl" href="${api}/api/orders/${o.order_no}/files/${i}/download?token=${encodeURIComponent(localStorage.getItem(TOKEN_KEY))}" download>下載</a></div>`
       ).join("");
       return `<div class="card">
         <div class="top">
@@ -477,7 +523,7 @@ function exportConfirmXlsx(o) {
         <div class="files">
           <div style="font-weight:600;margin-bottom:4px">檔案（${files.length} 個 · 共 ${totalQty} 次印製）</div>
           ${fileRows || "<div style='color:#999;font-size:13px'>無檔案</div>"}
-          ${files.length ? `<a class="zipbtn" href="${api}/api/orders/${o.order_no}/download?token=${tok}">↓ 整包 ZIP 一次下載</a>` : ""}
+          ${files.length ? `<a class="zipbtn" href="${api}/api/orders/${o.order_no}/download?token=${encodeURIComponent(localStorage.getItem(TOKEN_KEY))}">↓ 整包 ZIP 一次下載</a>` : ""}
         </div>
         ${confirmSection(o, idx)}
         <div class="pb-row">
@@ -498,6 +544,8 @@ function exportConfirmXlsx(o) {
       btn.addEventListener("click", () => exportConfirmXlsx(orders[Number(btn.getAttribute("data-idx"))]));
     });
   }
+
+  initAuth();
 </script>
 </body>
 </html>

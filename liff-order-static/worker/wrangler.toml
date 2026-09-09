@@ -3,7 +3,6 @@ main = "src/index.js"
 compatibility_date = "2026-08-01"
 
 [vars]
-ADMIN_TOKEN = "MyW691xMzwJ2WaaKE7Bn9aBjTuceHQFG"
 MAX_FILE_MB = "95"
 ZIP_MAX_MB = "20"
 
@@ -18,3 +17,7 @@ database_id = "b79351fa-9cb5-429b-a490-0add01f40b71"
 [[r2_buckets]]
 binding = "R2"
 bucket_name = "shubei-orders-files"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "4b497e1bfb304bdcbb5c3b9a63429901"

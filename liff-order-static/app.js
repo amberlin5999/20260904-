@@ -92,9 +92,9 @@ function currentAllowedExts() {
   return PRODUCT_FILE_TYPES[pt] || ALL_FILE_TYPES;
 }
 
-/** 正規化取得副檔名（忽略尾端空白／隱形字元、大小寫） */
+/** 正規化取得副檔名（忽略尾端空白／隱形字元、大小寫，限制長度 ≤ 5） */
 function extOf(name) {
-  const m = String(name).toLowerCase().trim().match(/\.([a-z0-9]{1,20})$/);
+  const m = String(name).toLowerCase().trim().match(/\.([a-z0-9]{1,5})$/);
   return m ? "." + m[1] : "";
 }
 
