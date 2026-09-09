@@ -123,7 +123,7 @@
     return token ? { "Authorization": "Bearer " + token } : {};
   }
 
-  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&", "<":"<", ">":">", '"':""", "'":"'" }[c])); }
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
   function fmtSize(n) { n = Number(n) || 0; const u = ["B","KB","MB","GB"]; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(n >= 10 || i === 0 ? 0 : 1) + " " + u[i]; }
   function stateCls(s) { return s === "received" ? "red" : (s === "files_uploaded" ? "green" : "gray"); }
   function stateLbl(s) { return s === "received" ? "已收單（尚未傳檔）" : (s === "files_uploaded" ? "檔案已上傳" : s); }
