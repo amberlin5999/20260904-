@@ -40,15 +40,31 @@ function cors(request, env) {
 }
 
 // JWT helpers (Web Crypto API)
+function b64UrlEncode(str) {
+  // UTF-8 安全：先編碼成 bytes 再 base64url，避免 btoa 對非 ASCII 拋錯
+  const bytes = new TextEncoder().encode(str);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+function b64UrlDecode(str) {
+  const b64 = str.replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(b64);
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
 async function jwtSign(payload, secret, expMinutes = 480) {
   const header = { alg: "HS256", typ: "JWT" };
   const now = Math.floor(Date.now() / 1000);
   const claims = { ...payload, iat: now, exp: now + expMinutes * 60 };
-  const enc = (obj) => btoa(JSON.stringify(obj)).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-  const unsigned = enc(header) + "." + enc(claims);
+  const unsigned = b64UrlEncode(JSON.stringify(header)) + "." + b64UrlEncode(JSON.stringify(claims));
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(unsigned));
-  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  const sigBytes = new Uint8Array(sig);
+  let bin = "";
+  for (const b of sigBytes) bin += String.fromCharCode(b);
+  const sigB64 = btoa(bin).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
   return unsigned + "." + sigB64;
 }
 
@@ -61,7 +77,7 @@ async function jwtVerify(token, secret) {
     const sig = new Uint8Array(atob(sigB64.replace(/-/g, "+").replace(/_/g, "/")).split("").map((c) => c.charCodeAt(0)));
     const valid = await crypto.subtle.verify("HMAC", key, sig, new TextEncoder().encode(unsigned));
     if (!valid) return null;
-    const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+    const payload = JSON.parse(b64UrlDecode(payloadB64));
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch (e) {
@@ -78,6 +94,27 @@ async function verifyPassword(password, storedHash) {
   const derived = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" }, key, 256);
   const derivedB64 = btoa(String.fromCharCode(...new Uint8Array(derived)));
   return derivedB64 === hashB64;
+}
+
+// 產生密碼 hash (PBKDF2-SHA256)
+async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const derived = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" }, key, 256);
+  const saltB64 = btoa(String.fromCharCode(...salt));
+  const hashB64 = btoa(String.fromCharCode(...new Uint8Array(derived)));
+  return saltB64 + ":" + hashB64;
+}
+
+// 寫入操作日誌
+async function writeAudit(env, username, action, order_no, detail, ip) {
+  try {
+    await env.DB.prepare(
+      "INSERT INTO admin_audit (username, action, order_no, detail, ip, created_at) VALUES (?,?,?,?,?,?)"
+    )
+      .bind(username, action, order_no || null, detail || null, ip || null, new Date().toISOString())
+      .run();
+  } catch (e) { /* 日誌失敗不阻斷主流程 */ }
 }
 
 function reply(data, status, hdrs) {
@@ -108,16 +145,28 @@ async function lineSignatureOk(request, env, bodyText) {
   return d === 0;
 }
 
-async function isAdmin(request, env) {
+async function getAuthUser(request, env) {
   const auth = request.headers.get("authorization") || "";
   let token = auth.replace(/^Bearer\s+/i, "").trim();
   if (!token) {
     const url = new URL(request.url);
     token = url.searchParams.get("token") || "";
   }
-  if (!token) return false;
+  if (!token) return null;
   const payload = await jwtVerify(token, env.JWT_SECRET);
-  return payload && payload.role === "admin";
+  return payload && payload.role === "admin" ? payload : null;
+}
+
+async function isAdmin(request, env) {
+  return !!(await getAuthUser(request, env));
+}
+
+// 人天角色是否為超管（從 DB 讀，避免權限變更後舊 token 仍有效）
+async function isSuperAdmin(request, env) {
+  const user = await getAuthUser(request, env);
+  if (!user) return false;
+  const row = await env.DB.prepare("SELECT role FROM admin_users WHERE username = ?").bind(user.user).first();
+  return (row && row.role === "admin") || false;
 }
 
 function sanitizeName(n) {
@@ -467,23 +516,87 @@ export default {
     const m = request.method;
 
     let data, status, rawRes = false;
+    const clientIp = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "";
     if (m === "POST" && p === "/api/admin/login") {
       let body;
       try { body = await request.json(); } catch (e) { body = null; }
       const username = body?.username?.trim();
       const password = body?.password;
       if (!username || !password) return reply({ ok: false, error: "請輸入帳號密碼" }, 400, c);
-      if (username !== "admin") return reply({ ok: false, error: "帳號或密碼錯誤" }, 401, c);
-      const hash = env.ADMIN_PASSWORD_HASH;
-      if (!hash || !(await verifyPassword(password, hash))) return reply({ ok: false, error: "帳號或密碼錯誤" }, 401, c);
-      const token = await jwtSign({ role: "admin", user: username }, env.JWT_SECRET, 480);
-      return reply({ ok: true, token }, 200, c);
+      const row = await env.DB.prepare("SELECT username, password_hash, role FROM admin_users WHERE username = ?").bind(username).first();
+      if (!row || !(await verifyPassword(password, row.password_hash)))
+        return reply({ ok: false, error: "帳號或密碼錯誤" }, 401, c);
+      const token = await jwtSign({ role: "admin", user: username, dbrole: row.role }, env.JWT_SECRET, 480);
+      await writeAudit(env, username, "login", null, "後台登入", clientIp);
+      return reply({ ok: true, token, username, role: row.role }, 200, c);
     } else if (m === "POST" && p === "/api/admin/logout") {
       // Stateless JWT，前端清除即可
       return reply({ ok: true }, 200, c);
     } else if (m === "GET" && p === "/api/admin/me") {
-      if (!await isAdmin(request, env)) return forbid(c);
-      return reply({ ok: true, user: "admin" }, 200, c);
+      const user = await getAuthUser(request, env);
+      if (!user) return forbid(c);
+      const row = await env.DB.prepare("SELECT username, role, created_at FROM admin_users WHERE username = ?").bind(user.user).first();
+      if (!row) return forbid(c);
+      return reply({ ok: true, username: row.username, role: row.role }, 200, c);
+    } else if (m === "POST" && p === "/api/admin/change-password") {
+      const user = await getAuthUser(request, env);
+      if (!user) return forbid(c);
+      let body;
+      try { body = await request.json(); } catch (e) { body = null; }
+      const oldPass = body?.old_password;
+      const newPass = body?.new_password;
+      if (!oldPass || !newPass) return reply({ ok: false, error: "請輸入舊密碼與新密碼" }, 400, c);
+      if (newPass.length < 8) return reply({ ok: false, error: "新密碼長度至少 8 碼" }, 400, c);
+      const row = await env.DB.prepare("SELECT password_hash FROM admin_users WHERE username = ?").bind(user.user).first();
+      if (!row) return forbid(c);
+      if (!(await verifyPassword(oldPass, row.password_hash))) return reply({ ok: false, error: "舊密碼錯誤" }, 400, c);
+      const newHash = await hashPassword(newPass);
+      const now = new Date().toISOString();
+      await env.DB.prepare("UPDATE admin_users SET password_hash = ?, updated_at = ? WHERE username = ?")
+        .bind(newHash, now, user.user).run();
+      await writeAudit(env, user.user, "change_password", null, "修改自己的密碼", clientIp);
+      return reply({ ok: true }, 200, c);
+    } else if (m === "POST" && p === "/api/admin/add-user") {
+      if (!await isSuperAdmin(request, env)) return reply({ ok: false, error: "僅超管可新增帳號" }, 403, c);
+      const superUser = await getAuthUser(request, env);
+      let body;
+      try { body = await request.json(); } catch (e) { body = null; }
+      const username = body?.username?.trim();
+      const password = body?.password;
+      const role = (body?.role === "admin") ? "admin" : "operator";
+      if (!username || !password) return reply({ ok: false, error: "請輸入帳號與密碼" }, 400, c);
+      if (username.length < 2) return reply({ ok: false, error: "帳號至少 2 字元" }, 400, c);
+      if (password.length < 8) return reply({ ok: false, error: "密碼長度至少 8 碼" }, 400, c);
+      const exist = await env.DB.prepare("SELECT username FROM admin_users WHERE username = ?").bind(username).first();
+      if (exist) return reply({ ok: false, error: "帳號已存在" }, 400, c);
+      const now = new Date().toISOString();
+      const hash = await hashPassword(password);
+      await env.DB.prepare("INSERT INTO admin_users (username, password_hash, role, created_at, updated_at) VALUES (?,?,?,?,?)")
+        .bind(username, hash, role, now, now).run();
+      await writeAudit(env, superUser.user, "add_user", null, `新增帳號 ${username}（${role}）`, clientIp);
+      return reply({ ok: true }, 200, c);
+    } else if (m === "POST" && p === "/api/admin/delete-user") {
+      if (!await isSuperAdmin(request, env)) return reply({ ok: false, error: "僅超管可刪除帳號" }, 403, c);
+      const superUser = await getAuthUser(request, env);
+      let body;
+      try { body = await request.json(); } catch (e) { body = null; }
+      const username = body?.username?.trim();
+      if (!username) return reply({ ok: false, error: "缺少帳號" }, 400, c);
+      if (username === superUser.user) return reply({ ok: false, error: "不能刪除自己" }, 400, c);
+      const head = await env.DB.prepare("SELECT role FROM admin_users WHERE username = ?").bind(username).first();
+      if (!head) return reply({ ok: false, error: "帳號不存在" }, 404, c);
+      if (head.role === "admin") return reply({ ok: false, error: "不能刪除超管帳號" }, 400, c);
+      await env.DB.prepare("DELETE FROM admin_users WHERE username = ?").bind(username).run();
+      await writeAudit(env, superUser.user, "delete_user", null, `刪除帳號 ${username}`, clientIp);
+      return reply({ ok: true }, 200, c);
+    } else if (m === "GET" && p === "/api/admin/list-users") {
+      if (!await isSuperAdmin(request, env)) return reply({ ok: false, error: "僅超管可查看帳號" }, 403, c);
+      const { results } = await env.DB.prepare("SELECT username, role, created_at, updated_at FROM admin_users ORDER BY created_at ASC").all();
+      return reply({ ok: true, users: results }, 200, c);
+    } else if (m === "GET" && p === "/api/admin/audit") {
+      if (!await isSuperAdmin(request, env)) return reply({ ok: false, error: "僅超管可查看操作日誌" }, 403, c);
+      const { results } = await env.DB.prepare("SELECT username, action, order_no, detail, ip, created_at FROM admin_audit ORDER BY id DESC LIMIT 200").all();
+      return reply({ ok: true, logs: results }, 200, c);
     } else if (m === "GET" && p === "/api/health") {
       data = { ok: true }; status = 200;
     } else if ((m === "GET" || m === "POST") && p === "/webhook/line") {
@@ -502,9 +615,11 @@ export default {
       data = await loadOrders(env);
       status = 200;
     } else if (m === "GET" && p.startsWith("/api/orders/") && p.endsWith("/download") && p.split("/").length === 5) {
-      if (!isAdmin(request, env)) return forbid(c);
+      const admin = await getAuthUser(request, env);
+      if (!admin) return forbid(c);
       const no = p.split("/")[3];
       [data, status, rawRes] = await downloadZip(env, no);
+      if (status < 400) await writeAudit(env, admin.user, "download_zip", no, "整包 ZIP 下載", clientIp);
     } else {
       const seg = p.split("/").filter(Boolean); // [api, orders, :no, ...]
       if (seg[0] === "api" && seg[1] === "orders" && seg[2]) {
@@ -520,8 +635,10 @@ export default {
           if (!rl.allowed) return reply({ ok: false, error: `上傳過於頻繁，請 ${rl.retryAfter} 秒後再試` }, 429, c);
           [data, status] = await uploadFile(request, env, no);
         } else if (m === "GET" && sub[0] === "files" && sub[1] !== undefined && sub[2] === "download") {
-          if (!isAdmin(request, env)) return forbid(c);
+          const admin = await getAuthUser(request, env);
+          if (!admin) return forbid(c);
           [data, status, rawRes] = await downloadFile(env, no, sub[1]);
+          if (status < 400) await writeAudit(env, admin.user, "download_file", no, `下載檔案索引 ${sub[1]}`, clientIp);
         } else if (m === "POST" && sub[0] === "sf-waybill") {
           if (!isAdmin(request, env)) return forbid(c);
           [data, status] = await sfWaybill(request, env, no);

@@ -62,31 +62,92 @@
     <input id="username" placeholder="帳號" value="admin" autocomplete="username">
     <input id="password" type="password" placeholder="密碼" autocomplete="current-password">
     <button onclick="login()">登入</button>
-    <div class="hint">預設帳號：admin / 密碼：admin123（請盡快修改）</div>
+    <div class="hint">初始密碼：password123（登入後請立即修改自己的密碼）</div>
   </div>
   <div class="bar" id="mainBar" hidden>
     <input id="api2" placeholder="後端網址" value="https://shubei-liff-order.shubei-liff-worker.workers.dev">
     <button onclick="load()">載入訂單</button>
-    <button onclick="logout()" class="pb-row" style="background:#c0392b">登出</button>
-    <div class="hint">JWT Token 存在 localStorage，重新整理保持登入。點登出清除。</div>
+    <button onclick="openChangePw()">修改密碼</button>
+    <button onclick="openUsers()">帳號管理</button>
+    <button onclick="openAudit()">操作日誌</button>
+    <span id="whoami" style="align-self:center;font-weight:700"></span>
+    <button onclick="logout()" style="background:#c0392b">登出</button>
+    <div class="hint">登入狀態存於 localStorage。超管（admin）可管理帳號與查看操作日誌。</div>
   </div>
   <div id="list"></div>
+</div>
+
+<!-- 修改密碼視窗 -->
+<div id="pwModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99;align-items:center;justify-content:center">
+  <div class="card" style="max-width:400px;width:90%;margin:0">
+    <div class="top"><span style="font-weight:700">修改密碼</span><button onclick="closePw()" style="border:0;background:none;font-size:20px;cursor:pointer">&times;</button></div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+      <input id="oldpw" type="password" placeholder="目前密碼" autocomplete="current-password">
+      <input id="newpw" type="password" placeholder="新密碼（至少 8 碼）" autocomplete="new-password">
+      <input id="newpw2" type="password" placeholder="再次輸入新密碼" autocomplete="new-password">
+      <button onclick="changePw()" style="padding:10px;border:0;border-radius:7px;background:#0f2537;color:#fff;cursor:pointer">確認修改</button>
+    </div>
+  </div>
+</div>
+
+<!-- 帳號管理視窗 -->
+<div id="usersModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99;align-items:center;justify-content:center">
+  <div class="card" style="max-width:560px;width:92%;margin:0">
+    <div class="top"><span style="font-weight:700">帳號管理</span><button onclick="closeUsers()" style="border:0;background:none;font-size:20px;cursor:pointer">&times;</button></div>
+    <div id="userList" style="margin-top:12px"></div>
+    <div class="add-user" style="border-top:1px dashed #dde3ea;margin-top:12px;padding-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+      <input id="nuName" placeholder="新帳號" style="padding:8px;border:1px solid #c9d2dc;border-radius:7px">
+      <input id="nuPass" type="password" placeholder="初始密碼" style="padding:8px;border:1px solid #c9d2dc;border-radius:7px">
+      <select id="nuRole" style="padding:8px;border:1px solid #c9d2dc;border-radius:7px">
+        <option value="operator">一般操作者</option>
+        <option value="admin">超管</option>
+      </select>
+      <button onclick="addUser()" style="padding:8px 14px;border:0;border-radius:7px;background:#2e7d46;color:#fff;cursor:pointer">新增</button>
+    </div>
+  </div>
+</div>
+
+<!-- 操作日誌視窗 -->
+<div id="auditModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99;align-items:center;justify-content:center">
+  <div class="card" style="max-width:760px;width:94%;margin:0">
+    <div class="top"><span style="font-weight:700">操作日誌</span><button onclick="closeAudit()" style="border:0;background:none;font-size:20px;cursor:pointer">&times;</button></div>
+    <div id="auditList" style="margin-top:12px;max-height:60vh;overflow:auto"></div>
+  </div>
 </div>
 
 <script>
   const $ = (id) => document.getElementById(id);
   const TOKEN_KEY = "admin_jwt";
   let orders = [];
+  let currentUser = null; // { username, role }
+
+  function whoami() { return localStorage.getItem("whoami") ? JSON.parse(localStorage.getItem("whoami")) : null; }
+  function setWhoami(u) { if (u) localStorage.setItem("whoami", JSON.stringify(u)); else localStorage.removeItem("whoami"); }
 
   // 初始化：檢查是否已有 token
-  function initAuth() {
+  async function initAuth() {
     const token = localStorage.getItem(TOKEN_KEY);
     if (token) {
-      $("loginBar").hidden = true;
-      $("mainBar").hidden = false;
-      $("api2").value = $("api").value;
-      load();
+      try {
+        await refreshMe();
+        $("loginBar").hidden = true;
+        $("mainBar").hidden = false;
+        $("api2").value = $("api").value;
+        load();
+      } catch (e) {
+        logout();
+      }
     }
+  }
+
+  async function refreshMe() {
+    const api = $("api").value.trim().replace(/\/+$/, "");
+    const r = await fetch(api + "/api/admin/me", { headers: getAuthHeaders() });
+    if (!r.ok) throw new Error("session expired");
+    const data = await r.json();
+    currentUser = { username: data.username, role: data.role };
+    setWhoami(currentUser);
+    $("whoami").textContent = "👤 " + currentUser.username + (currentUser.role === "admin" ? "（超管）" : "");
   }
 
   async function login() {
@@ -103,20 +164,114 @@
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "登入失敗");
       localStorage.setItem(TOKEN_KEY, data.token);
+      setWhoami({ username: data.username, role: data.role });
+      currentUser = { username: data.username, role: data.role };
       $("loginBar").hidden = true;
       $("mainBar").hidden = false;
       $("api2").value = api;
+      $("whoami").textContent = "👤 " + currentUser.username + (currentUser.role === "admin" ? "（超管）" : "");
+      $("password").value = "";
       load();
     } catch (e) { alert("登入失敗：" + e.message); }
   }
 
   function logout() {
     localStorage.removeItem(TOKEN_KEY);
+    setWhoami(null);
+    currentUser = null;
     $("loginBar").hidden = false;
     $("mainBar").hidden = true;
     $("list").innerHTML = "";
     $("password").value = "";
   }
+
+  /* ---- 修改密碼 ---- */
+  function openChangePw() { $("pwModal").style.display = "flex"; $("oldpw").value = ""; $("newpw").value = ""; $("newpw2").value = ""; }
+  function closePw() { $("pwModal").style.display = "none"; }
+  async function changePw() {
+    const api = $("api2").value.trim().replace(/\/+$/, "");
+    const oldPass = $("oldpw").value;
+    const newPass = $("newpw").value;
+    if (!oldPass || !newPass) { alert("請填寫密碼"); return; }
+    if (newPass.length < 8) { alert("新密碼至少 8 碼"); return; }
+    if (newPass !== $("newpw2").value) { alert("兩次新密碼不一致"); return; }
+    try {
+      const r = await fetch(api + "/api/admin/change-password", {
+        method: "POST", headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ old_password: oldPass, new_password: newPass })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "修改失敗");
+      alert("密碼修改成功，下次請用新密碼登入");
+      closePw();
+    } catch (e) { alert("修改失敗：" + e.message); }
+  }
+
+  /* ---- 帳號管理（超管） ---- */
+  function openUsers() {
+    const api = $("api2").value.trim().replace(/\/+$/, "");
+    fetch(api + "/api/admin/list-users", { headers: getAuthHeaders() })
+      .then(r => r.json()).then(data => {
+        if (!data.ok) { alert(data.error || "無法讀取帳號"); return; }
+        $("userList").innerHTML = data.users.map(u => `
+          <div class="frow">
+            <span class="nm"><b>${esc(u.username)}</b> <span style="color:#888">${u.role === "admin" ? "超管" : "操作者"}</span></span>
+            <span style="color:#999;font-size:12px">建立 ${fmtDate(u.created_at)}</span>
+            ${u.role !== "admin" ? `<button onclick="deleteUser('${esc(u.username)}')" style="padding:4px 10px;border:0;border-radius:6px;background:#c0392b;color:#fff;cursor:pointer">刪除</button>` : ""}
+          </div>`).join("") || "<div class='empty'>無帳號</div>";
+        $("usersModal").style.display = "flex";
+      }).catch(e => alert("讀取帳號失敗：" + e.message));
+  }
+  function closeUsers() { $("usersModal").style.display = "none"; }
+  async function deleteUser(username) {
+    if (!confirm("確定刪除帳號「" + username + "」？")) return;
+    const api = $("api2").value.trim().replace(/\/+$/, "");
+    try {
+      const r = await fetch(api + "/api/admin/delete-user", {
+        method: "POST", headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ username })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "刪除失敗");
+      alert("已刪除");
+      openUsers();
+    } catch (e) { alert("刪除失敗：" + e.message); }
+  }
+  async function addUser() {
+    const api = $("api2").value.trim().replace(/\/+$/, "");
+    const username = $("nuName").value.trim();
+    const password = $("nuPass").value;
+    const role = $("nuRole").value;
+    if (!username || !password) { alert("請輸入帳號與密碼"); return; }
+    try {
+      const r = await fetch(api + "/api/admin/add-user", {
+        method: "POST", headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ username, password, role })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "新增失敗");
+      $("nuName").value = ""; $("nuPass").value = "";
+      alert("已新增帳號");
+      openUsers();
+    } catch (e) { alert("新增失敗：" + e.message); }
+  }
+
+  /* ---- 操作日誌（超管） ---- */
+  function openAudit() {
+    const api = $("api2").value.trim().replace(/\/+$/, "");
+    fetch(api + "/api/admin/audit", { headers: getAuthHeaders() })
+      .then(r => r.json()).then(data => {
+        if (!data.ok) { alert(data.error || "無法讀取日誌"); return; }
+        const labels = { login:"登入", download_zip:"打包下載", download_file:"下載檔案", change_password:"修改密碼", add_user:"新增帳號", delete_user:"刪除帳號" };
+        $("auditList").innerHTML = data.logs.length ? data.logs.map(l => `
+          <div class="frow">
+            <span class="nm"><b>${esc(l.username)}</b> · ${esc(labels[l.action] || l.action)}${l.order_no ? " · #" + esc(l.order_no) : ""}${l.detail ? " · " + esc(l.detail) : ""}</span>
+            <span style="color:#999;font-size:12px;white-space:nowrap">${fmtDate(l.created_at, true)}</span>
+          </div>`).join("") : "<div class='empty'>尚無操作紀錄</div>";
+        $("auditModal").style.display = "flex";
+      }).catch(e => alert("讀取日誌失敗：" + e.message));
+  }
+  function closeAudit() { $("auditModal").style.display = "none"; }
 
   function getAuthHeaders() {
     const token = localStorage.getItem(TOKEN_KEY);
