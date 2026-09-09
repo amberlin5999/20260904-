@@ -9,6 +9,12 @@ ZIP_MAX_MB = "20"
 # 前端網域；要暫時允許本機測試時，加進 CORS_ORIGINS
 CORS_ORIGINS = "https://aceeprint.vercel.app"
 
+# 定期清理：建立超過 N 天且「尚未傳檔」的訂單會在每日 cron 中被清除（0 = 停用）
+CLEANUP_AFTER_DAYS = "60"
+
+[triggers]
+crons = ["0 3 * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "shubei-orders"

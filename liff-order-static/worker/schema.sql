@@ -2,10 +2,13 @@
 -- 用法：npx wrangler d1 execute <database-name> --remote --file=schema.sql
 
 CREATE TABLE IF NOT EXISTS orders (
-  order_no   TEXT PRIMARY KEY,
-  status     TEXT NOT NULL DEFAULT 'received',
-  data       TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  order_no      TEXT PRIMARY KEY,
+  status        TEXT NOT NULL DEFAULT 'received',
+  data          TEXT NOT NULL,
+  created_at    TEXT NOT NULL,
+  manage_status TEXT NOT NULL DEFAULT 'pending',  -- 後台管理狀態：pending(待處理) / followup(跟催中) / done(已處理) / cleaned(已清理)
+  followup_at   TEXT,                              -- 下次跟催日期 (YYYY-MM-DD)
+  note          TEXT                               -- 內部備註（跟催事項等）
 );
 
 CREATE TABLE IF NOT EXISTS order_files (

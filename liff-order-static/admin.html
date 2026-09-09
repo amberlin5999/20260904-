@@ -21,6 +21,11 @@
   .st.red { background: #fbe4e4; color: #b33; }
   .st.green { background: #e2f3e6; color: #287a3a; }
   .st.gray { background: #eceff3; color: #666; }
+  .st.amber { background: #fdf3d7; color: #8a6d00; }
+  .st.mgr { margin-left: 4px; }
+  .manage-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #dde3ea; align-items: center; }
+  .manage-row select, .manage-row input { padding: 6px 8px; border: 1px solid #c9d2dc; border-radius: 7px; font-size: 13px; }
+  .manage-row .m-followup { width: 150px; }
   .meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 14px; margin: 10px 0; font-size: 13px; color: #444; }
   .meta b { color: #222; }
   .files { border-top: 1px dashed #dde3ea; margin-top: 8px; padding-top: 8px; }
@@ -74,6 +79,29 @@
     <button onclick="logout()" style="background:#c0392b">登出</button>
     <div class="hint">登入狀態存於 localStorage。超管（admin）可管理帳號與查看操作日誌。</div>
   </div>
+  <div class="bar" id="filterBar" hidden style="flex-wrap:wrap;gap:6px">
+    <label style="align-self:center">建立日期</label>
+    <input id="fFrom" type="date" style="padding:7px;border:1px solid #c9d2dc;border-radius:7px">
+    <label style="align-self:center">至</label>
+    <input id="fTo" type="date" style="padding:7px;border:1px solid #c9d2dc;border-radius:7px">
+    <select id="fStatus" style="padding:7px;border:1px solid #c9d2dc;border-radius:7px">
+      <option value="">狀態：全部</option>
+      <option value="received">已收單（尚未傳檔）</option>
+      <option value="files_uploaded">檔案已上傳</option>
+    </select>
+    <select id="fManage" style="padding:7px;border:1px solid #c9d2dc;border-radius:7px">
+      <option value="">管理：全部</option>
+      <option value="pending">待處理</option>
+      <option value="followup">跟催中</option>
+      <option value="done">已處理</option>
+      <option value="cleaned">已清理</option>
+    </select>
+    <button onclick="load()" style="padding:7px 14px;border:0;border-radius:7px;background:#0f2537;color:#fff;cursor:pointer">篩選</button>
+    <button onclick="clearFilter()" style="padding:7px 14px;border:1px solid #c9d2dc;border-radius:7px;background:#fff;cursor:pointer">清除</button>
+    <span id="filterStats" style="align-self:center;font-size:12px;color:#0057a3;font-weight:600"></span>
+    <span style="flex:1"></span>
+    <button id="cleanupBtn" onclick="openCleanup()" hidden style="padding:7px 14px;border:0;border-radius:7px;background:#c0392b;color:#fff;cursor:pointer">清理未完成訂單</button>
+  </div>
   <div id="list"></div>
 </div>
 
@@ -115,6 +143,23 @@
   </div>
 </div>
 
+<!-- 清理未完成訂單視窗 -->
+<div id="cleanupModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99;align-items:center;justify-content:center">
+  <div class="card" style="max-width:560px;width:92%;margin:0">
+    <div class="top"><span style="font-weight:700">清理未完成訂單</span><button onclick="closeCleanup()" style="border:0;background:none;font-size:20px;cursor:pointer">&times;</button></div>
+    <div style="margin-top:12px;font-size:13px;color:#555">
+      清除「已收單但尚未上傳檔案、且建立超過指定天數」的訂單。此動作會<strong style="color:#c0392b">同時刪除訂單與相關檔案記錄，無法復原</strong>。
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+      <input id="cleanupDays" type="number" min="0" value="60" style="width:80px;padding:8px;border:1px solid #c9d2dc;border-radius:7px">
+      <span style="font-size:13px;color:#555">天以上</span>
+      <button onclick="previewCleanup()" style="padding:8px 14px;border:1px solid #c9d2dc;border-radius:7px;background:#fff;cursor:pointer">預覽</button>
+      <button onclick="doCleanup()" style="padding:8px 14px;border:0;border-radius:7px;background:#c0392b;color:#fff;cursor:pointer">確認清理</button>
+    </div>
+    <div id="cleanupPreview" style="margin-top:12px;max-height:40vh;overflow:auto;font-size:13px"></div>
+  </div>
+</div>
+
 <script>
   const $ = (id) => document.getElementById(id);
   const TOKEN_KEY = "admin_jwt";
@@ -132,6 +177,8 @@
         await refreshMe();
         $("loginBar").hidden = true;
         $("mainBar").hidden = false;
+        $("filterBar").hidden = false;
+        showCleanupBtn();
         $("api2").value = $("api").value;
         load();
       } catch (e) {
@@ -168,6 +215,8 @@
       currentUser = { username: data.username, role: data.role };
       $("loginBar").hidden = true;
       $("mainBar").hidden = false;
+      $("filterBar").hidden = false;
+      showCleanupBtn();
       $("api2").value = api;
       $("whoami").textContent = "👤 " + currentUser.username + (currentUser.role === "admin" ? "（超管）" : "");
       $("password").value = "";
@@ -181,6 +230,7 @@
     currentUser = null;
     $("loginBar").hidden = false;
     $("mainBar").hidden = true;
+    $("filterBar").hidden = true;
     $("list").innerHTML = "";
     $("password").value = "";
   }
@@ -262,7 +312,7 @@
     fetch(api + "/api/admin/audit", { headers: getAuthHeaders() })
       .then(r => r.json()).then(data => {
         if (!data.ok) { alert(data.error || "無法讀取日誌"); return; }
-        const labels = { login:"登入", download_zip:"打包下載", download_file:"下載檔案", change_password:"修改密碼", add_user:"新增帳號", delete_user:"刪除帳號" };
+        const labels = { login:"登入", download_zip:"打包下載", download_file:"下載檔案", change_password:"修改密碼", add_user:"新增帳號", delete_user:"刪除帳號", manage:"管理進度", cleanup:"清理未完成" };
         $("auditList").innerHTML = data.logs.length ? data.logs.map(l => `
           <div class="frow">
             <span class="nm"><b>${esc(l.username)}</b> · ${esc(labels[l.action] || l.action)}${l.order_no ? " · #" + esc(l.order_no) : ""}${l.detail ? " · " + esc(l.detail) : ""}</span>
@@ -273,6 +323,60 @@
   }
   function closeAudit() { $("auditModal").style.display = "none"; }
 
+  /* ---- 篩選 ---- */
+  function clearFilter() {
+    $("fFrom").value = ""; $("fTo").value = ""; $("fStatus").value = ""; $("fManage").value = "";
+    load();
+  }
+  function showCleanupBtn() {
+    const u = whoami();
+    $("cleanupBtn").hidden = !(u && u.role === "admin");
+  }
+  function loadQuery() {
+    const q = new URLSearchParams();
+    if ($("fFrom").value) q.set("from", $("fFrom").value);
+    if ($("fTo").value) q.set("to", $("fTo").value);
+    if ($("fStatus").value) q.set("status", $("fStatus").value);
+    if ($("fManage").value) q.set("manage", $("fManage").value);
+    const s = q.toString();
+    return s ? "?" + s : "";
+  }
+
+  /* ---- 清理未完成訂單（超管） ---- */
+  function openCleanup() { $("cleanupModal").style.display = "flex"; $("cleanupPreview").innerHTML = ""; }
+  function closeCleanup() { $("cleanupModal").style.display = "none"; }
+  function previewCleanup() {
+    const api = $("api2").value.trim().replace(/\/+$/, "");
+    const days = Number($("cleanupDays").value) || 0;
+    // 列出待清理的單（建立日期 <= N 天前 → 已超過 N 天）
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    const q = new URLSearchParams();
+    q.set("to", cutoff);
+    fetch(api + "/api/orders?" + q + "&status=received", { headers: getAuthHeaders() })
+      .then(r => r.json()).then(list => {
+        const arr = Array.isArray(list) ? list : [];
+        const box = $("cleanupPreview");
+        if (!arr.length) { box.innerHTML = "<div class='empty'>此條件下沒有可清理的訂單</div>"; return; }
+        box.innerHTML = `<div style="color:#c0392b;font-weight:700;margin-bottom:6px">將清理 ${arr.length} 筆未完成訂單：</div>` +
+          arr.map(o => `<div class="frow"><span class="nm">#${esc(o.order_no)}</span><span style="color:#999;font-size:12px">建立 ${fmtDate(o.created_at)}</span></div>`).join("");
+      }).catch(e => alert("預覽失敗：" + e.message));
+  }
+  function doCleanup() {
+    const api = $("api2").value.trim().replace(/\/+$/, "");
+    const days = Number($("cleanupDays").value) || 0;
+    if (!confirm(`確認清理建立超過 ${days} 天的「尚未傳檔」訂單？此動作無法復原！`)) return;
+    fetch(api + "/api/orders/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify({ days })
+    }).then(r => r.json()).then(d => {
+      if (!d.ok) { alert(d.error || "清理失敗"); return; }
+      alert(`已清理 ${d.cleaned} 筆訂單`);
+      closeCleanup();
+      load();
+    }).catch(e => alert("清理失敗：" + e.message));
+  }
+
   function getAuthHeaders() {
     const token = localStorage.getItem(TOKEN_KEY);
     return token ? { "Authorization": "Bearer " + token } : {};
@@ -282,6 +386,9 @@
   function fmtSize(n) { n = Number(n) || 0; const u = ["B","KB","MB","GB"]; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(n >= 10 || i === 0 ? 0 : 1) + " " + u[i]; }
   function stateCls(s) { return s === "received" ? "red" : (s === "files_uploaded" ? "green" : "gray"); }
   function stateLbl(s) { return s === "received" ? "已收單（尚未傳檔）" : (s === "files_uploaded" ? "檔案已上傳" : s); }
+  function manageCls(s) { return s === "done" ? "green" : (s === "followup" ? "amber" : "gray"); }
+  function manageLbl(s) { return s === "pending" ? "待處理" : (s === "followup" ? "跟催中" : (s === "done" ? "已處理" : (s === "cleaned" ? "已清理" : s))); }
+  function followupOverdue(d) { try { return d && new Date(d).getTime() < new Date(new Date().toDateString()).getTime(); } catch (e) { return false; } }
   function fmtDate(iso, hasTime) { try { const d = new Date(iso); if (isNaN(d)) return iso; return hasTime ? d.toLocaleString("zh-TW", { hour12: false }) : d.toLocaleDateString("zh-TW"); } catch (e) { return iso; } }
   function kv(label, val) { return val === undefined || val === null || String(val).trim() === "" ? "" : `<div><b>${esc(label)}</b> ${esc(val)}</div>`; }
   function fmtMoney(v) { const n = Number(v) || 0; return n ? n.toLocaleString("zh-TW", { maximumFractionDigits: 2 }) : ""; }
@@ -311,6 +418,28 @@
     if (!d) return { rows: [], price: 0 };
     if (Array.isArray(d)) return { rows: d.map(x => ({ len: Number(x.len) || 0 })), price: 0 };  // 舊格式相容
     return d;
+  }
+
+  /* ---- 儲存管理進度 ---- */
+  async function saveManage(order, selectEl, full) {
+    const api = $("api2").value.trim().replace(/\/+$/, "");
+    const rowEl = full ? document.querySelector(`.manage-row[data-no="${order.order_no}"]`) : selectEl.closest(".manage-row");
+    if (!rowEl) return;
+    const body = {
+      manage_status: (rowEl.querySelector(".m-status") || {}).value || order.manage_status || "pending",
+      followup_at: (rowEl.querySelector(".m-followup") || {}).value || null,
+      note: (rowEl.querySelector(".m-note") || {}).value || "",
+    };
+    try {
+      const r = await fetch(api + "/api/orders/" + encodeURIComponent(order.order_no) + "/manage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify(body)
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "儲存失敗");
+      load();
+    } catch (e) { alert("儲存失敗：" + e.message); }
   }
   function parseDim(s) {
     const m = String(s || "").match(/(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)/);
@@ -625,7 +754,7 @@ function exportConfirmXlsx(o) {
     box.innerHTML = "<div class='empty'>讀取中…</div>";
     let ordersData;
     try {
-      const r = await fetch(api + "/api/orders", { headers: getAuthHeaders() });
+      const r = await fetch(api + "/api/orders" + loadQuery(), { headers: getAuthHeaders() });
       if (r.status === 401) { logout(); throw new Error("登入已過期，請重新登入"); }
       if (!r.ok) throw new Error("HTTP " + r.status);
       ordersData = await r.json();
@@ -634,6 +763,10 @@ function exportConfirmXlsx(o) {
       return;
     }
     orders = ordersData;
+    const allCount = orders.length;
+    const recvCount = orders.filter(o => o.status === "received").length;
+    const followupCount = orders.filter(o => o.manage_status !== "done" && (o.status === "received" || String(o.manage_status).includes("follow"))).length;
+    $("filterStats").textContent = `共 ${allCount} 筆｜尚未傳檔 ${recvCount} 筆｜待處理/跟催 ${followupCount} 筆`;
     if (!orders || !orders.length) { box.innerHTML = "<div class='empty'>目前沒有訂單</div>"; return; }
     box.innerHTML = orders.map((o, idx) => {
       const files = o.files || [];
@@ -654,6 +787,7 @@ function exportConfirmXlsx(o) {
         <div class="top">
           <span class="no">#${esc(o.order_no)}</span>
           <span class="st ${stateCls(o.status)}">${esc(stateLbl(o.status))}</span>
+          <span class="st mgr ${manageCls(o.manage_status)}">${esc(manageLbl(o.manage_status))}</span>
         </div>
         <div class="meta">
           ${kv("下單時間", fmtDate(o.created_at, true))}
@@ -674,6 +808,8 @@ function exportConfirmXlsx(o) {
           ${addr}
           ${kv("順豐運單號", (o.sf && (o.sf.waybill_no || "")) || "")}
           ${kv("備註", o.notes)}
+          ${o.followup_at ? kv("跟催日期", fmtDate(o.followup_at)) + (followupOverdue(o.followup_at) ? "<div style='color:#c0392b;font-weight:700'>⚠ 已過跟催日，請追蹤客戶</div>" : "") : ""}
+          ${o.note ? kv("內部備註", o.note) : ""}
         </div>
         <div class="files">
           <div style="font-weight:600;margin-bottom:4px">檔案（${files.length} 個 · 共 ${totalQty} 次印製）</div>
@@ -684,6 +820,17 @@ function exportConfirmXlsx(o) {
         <div class="pb-row">
           <button class="pb-work" onclick="printWork(orders[${idx}])">W 派工單</button>
           <button class="pb-qc" onclick="printQc(orders[${idx}])">QC 品管確認單</button>
+        </div>
+        <div class="manage-row" data-no="${esc(o.order_no)}">
+          <select class="m-status" onchange="saveManage(orders[${idx}], this)">
+            <option value="pending" ${o.manage_status === "pending" ? "selected" : ""}>待處理</option>
+            <option value="followup" ${o.manage_status === "followup" ? "selected" : ""}>跟催中</option>
+            <option value="done" ${o.manage_status === "done" ? "selected" : ""}>已處理</option>
+            <option value="cleaned" ${o.manage_status === "cleaned" ? "selected" : ""}>已清理</option>
+          </select>
+          <input type="date" class="m-followup" data-no="${esc(o.order_no)}" value="${esc(o.followup_at || "")}" title="下次跟催日期">
+          <input type="text" class="m-note" data-no="${esc(o.order_no)}" value="${esc(o.note || "")}" placeholder="內部備註／跟催事項" style="flex:1;min-width:140px">
+          <button onclick="saveManage(orders[${idx}], null, true)" style="padding:5px 12px;border:0;border-radius:6px;background:#0f2537;color:#fff;cursor:pointer">儲存進度</button>
         </div>
       </div>`;
     }).join("");

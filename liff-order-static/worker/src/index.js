@@ -255,13 +255,36 @@ async function hydrate(row, env) {
       .bind(row.order_no)
       .all()
   ).results;
-  return { order_no: row.order_no, status: row.status, created_at: row.created_at, ...data, files };
+  return {
+    order_no: row.order_no,
+    status: row.status,
+    created_at: row.created_at,
+    manage_status: row.manage_status || "pending",
+    followup_at: row.followup_at || null,
+    note: row.note || "",
+    ...data,
+    files,
+  };
 }
 
-async function loadOrders(env) {
-  const { results } = await env.DB.prepare(
-    "SELECT order_no, status, data, created_at FROM orders ORDER BY created_at DESC"
-  ).all();
+// 依建立日期（order_no 前 8 碼 YYYYMMDD）/狀態/管理狀態篩選
+async function loadOrders(env, q = {}) {
+  const where = [];
+  const bind = [];
+  if (q.from) {
+    const f = q.from.replace(/-/g, "");
+    if (/^\d{8}$/.test(f)) { where.push("substr(order_no,1,8) >= ?"); bind.push(f); }
+  }
+  if (q.to) {
+    const t = q.to.replace(/-/g, "");
+    if (/^\d{8}$/.test(t)) { where.push("substr(order_no,1,8) <= ?"); bind.push(t); }
+  }
+  if (q.status) { where.push("status = ?"); bind.push(q.status); }
+  if (q.manage) { where.push("manage_status = ?"); bind.push(q.manage); }
+  let sql = "SELECT order_no, status, created_at, data, manage_status, followup_at, note FROM orders";
+  if (where.length) sql += " WHERE " + where.join(" AND ");
+  sql += " ORDER BY created_at DESC";
+  const { results } = await env.DB.prepare(sql).bind(...bind).all();
   const out = [];
   for (const row of results) out.push(await hydrate(row, env));
   return out;
@@ -364,12 +387,65 @@ async function completeOrder(request, env, no) {
 
 async function orderDetail(env, no) {
   const row = await env.DB.prepare(
-    "SELECT order_no, status, data, created_at FROM orders WHERE order_no = ?"
+    "SELECT order_no, status, created_at, data, manage_status, followup_at, note FROM orders WHERE order_no = ?"
   )
     .bind(no)
     .first();
   if (!row) return [{ ok: false, error: "訂單不存在" }, 404];
   return [await hydrate(row, env), 200];
+}
+
+// 更新後台管理進度：狀態（待處理/跟催中/已處理）+ 下次跟催日 + 備註
+async function updateManage(request, env, no) {
+  const row = await env.DB.prepare("SELECT order_no FROM orders WHERE order_no = ?").bind(no).first();
+  if (!row) return [{ ok: false, error: "訂單不存在" }, 404];
+  let body;
+  try { body = await request.json(); } catch (e) { body = null; }
+  if (!body || typeof body !== "object") return [{ ok: false, error: "JSON 解析失敗" }, 400];
+  const status = ["pending", "followup", "done", "cleaned"].includes(body.manage_status) ? body.manage_status : "";
+  const followupAt = String(body.followup_at || "").trim() || null;
+  const note = String(body.note ?? "").trim();
+  if (!status) return [{ ok: false, error: "管理狀態無效" }, 400];
+  if (followupAt && !/^\d{4}-\d{2}-\d{2}$/.test(followupAt))
+    return [{ ok: false, error: "跟催日期格式須為 YYYY-MM-DD" }, 400];
+  await env.DB.prepare("UPDATE orders SET manage_status = ?, followup_at = ?, note = ? WHERE order_no = ?")
+    .bind(status, followupAt, note, no)
+    .run();
+  return [{ ok: true, order_no: no, manage_status: status, followup_at: followupAt, note }, 200];
+}
+
+// 清理長期未完成（僅限 status=received，尚未傳檔）的訂單：刪 D1 資料列
+// days>0：清理建立超過 N 天且仍未完成的；預設無特別條件時清空
+async function cleanupOrders(env, days, actor = "system") {
+  const cutoff = new Date(Date.now() - Number(days || 0) * 86400000).toISOString();
+  let rows;
+  if (days > 0) {
+    rows = (
+      await env.DB.prepare(
+        "SELECT order_no, created_at FROM orders WHERE status = 'received' AND created_at < ? ORDER BY created_at ASC"
+      )
+        .bind(cutoff)
+        .all()
+    ).results;
+  } else {
+    rows = (
+      await env.DB.prepare("SELECT order_no, created_at FROM orders WHERE status = 'received' ORDER BY created_at ASC")
+        .all()
+    ).results;
+  }
+  for (const r of rows) {
+    const files = (
+      await env.DB.prepare("SELECT object_key FROM order_files WHERE order_no = ? ORDER BY id ASC")
+        .bind(r.order_no)
+        .all()
+    ).results;
+    for (const f of files) {
+      try { await env.R2.delete(f.object_key); } catch (e) { /* R2 刪除失敗不阻斷 */ }
+    }
+    await env.DB.prepare("DELETE FROM orders WHERE order_no = ?").bind(r.order_no).run();
+    await writeAudit(env, actor, "cleanup", r.order_no, `清理未完成訂單（建立於 ${r.created_at}）`, "");
+  }
+  return rows.length;
 }
 
 async function downloadFile(env, no, index) {
@@ -612,7 +688,12 @@ export default {
       [data, status] = await createOrder(request, env);
     } else if (m === "GET" && p === "/api/orders") {
       if (!isAdmin(request, env)) return forbid(c);
-      data = await loadOrders(env);
+      data = await loadOrders(env, {
+        from: url.searchParams.get("from") || "",
+        to: url.searchParams.get("to") || "",
+        status: url.searchParams.get("status") || "",
+        manage: url.searchParams.get("manage") || "",
+      });
       status = 200;
     } else if (m === "GET" && p.startsWith("/api/orders/") && p.endsWith("/download") && p.split("/").length === 5) {
       const admin = await getAuthUser(request, env);
@@ -630,6 +711,12 @@ export default {
           [data, status] = await orderDetail(env, no);
         } else if (m === "POST" && sub[0] === "complete") {
           [data, status] = await completeOrder(request, env, no);
+        } else if (m === "POST" && sub[0] === "manage") {
+          const admin = await getAuthUser(request, env);
+          if (!admin) return forbid(c);
+          [data, status] = await updateManage(request, env, no);
+          if (data && data.ok && status < 400)
+            await writeAudit(env, admin.user, "manage", no, `管理狀態 → ${data.manage_status}` + (data.followup_at ? `、跟催 ${data.followup_at}` : "") + (data.note ? `、備註「${data.note}」` : ""), clientIp);
         } else if (m === "POST" && sub[0] === "files") {
           const rl = await checkRateLimit(env, `upload:${request.headers.get("cf-connecting-ip") || "unknown"}:${no}`, 60, 60000);
           if (!rl.allowed) return reply({ ok: false, error: `上傳過於頻繁，請 ${rl.retryAfter} 秒後再試` }, 429, c);
@@ -642,7 +729,15 @@ export default {
         } else if (m === "POST" && sub[0] === "sf-waybill") {
           if (!isAdmin(request, env)) return forbid(c);
           [data, status] = await sfWaybill(request, env, no);
-        } else {
+} else if (m === "POST" && p === "/api/orders/cleanup") {
+      if (!await isSuperAdmin(request, env)) return reply({ ok: false, error: "僅超管可執行清理" }, 403, c);
+      const actor = (await getAuthUser(request, env)).user;
+      let body;
+      try { body = await request.json(); } catch (e) { body = null; }
+      const days = Math.max(0, Number(body?.days) || 0);
+      const cleaned = await cleanupOrders(env, days, actor);
+      return reply({ ok: true, cleaned, days }, 200, c);
+    } else {
           return reply({ ok: false, error: "找不到此端點" }, 404, c);
         }
       } else {
@@ -658,5 +753,13 @@ export default {
       return reply(data || { ok: false, error: "錯誤" }, status || 500, c);
     }
     return reply(data, status || 200, c);
+  },
+
+  // 定期清理：每天自動清除超過 CLEANUP_AFTER_DAYS 天仍未上傳檔案的訂單
+  async scheduled(event, env, ctx) {
+    const days = Number(env.CLEANUP_AFTER_DAYS || 0);
+    if (!(days > 0)) return;
+    const count = await cleanupOrders(env, days, "system");
+    console.log(`scheduled cleanup: removed ${count} incomplete orders (older than ${days} days)`);
   },
 };
