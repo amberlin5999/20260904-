@@ -417,7 +417,19 @@ function syncLogisticsFields() {
 
 document.addEventListener("change", (e) => {
   if (e.target.id === "logisticsMethod") syncLogisticsFields();
+  if (e.target.id === "priority") updatePriorityHint();
 });
+
+const PRIORITY_HINTS = {
+  "一般": "以取件日為準，正常為三個工作天完成",
+  "急件": "在 1 個工作天內完成",
+  "特急": "3小時內完成，需加「加急」處理費",
+};
+function updatePriorityHint() {
+  const el = document.getElementById("priority");
+  const hint = document.getElementById("priorityHint");
+  if (el && hint) hint.textContent = PRIORITY_HINTS[el.value] || "";
+}
 
 /* ==========================
  * 超商取貨：門市選擇（ezShip 電子地圖）

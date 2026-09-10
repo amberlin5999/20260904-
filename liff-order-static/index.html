@@ -116,11 +116,12 @@
           </label>
           <label class="field">
             <span>時效等級</span>
-            <select name="priority">
-              <option>一般</option>
-              <option>優先</option>
-              <option>急件（需加價）</option>
+            <select name="priority" id="priority">
+              <option value="一般" selected>一般</option>
+              <option value="急件">急件</option>
+              <option value="特急">特急</option>
             </select>
+            <div class="hint" id="priorityHint">以取件日為準，正常為三個工作天完成</div>
           </label>
         </div>
 
