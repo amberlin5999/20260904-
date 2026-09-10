@@ -708,6 +708,14 @@ function exportConfirmXlsx(o) {
     const unit = unitOf(o);
     const date = new Date();
     const qno = "Q-" + o.order_no;
+    const subtotal = q.total || 0;
+    const tax = subtotal > 0 ? subtotal * 0.05 : 0;
+    const grand = subtotal > 0 ? subtotal + tax : 0;
+    const totalRows = subtotal > 0
+      ? `<tr><td colspan="${q.isLen ? 5 : 4}">合計金額（未稅）</td><td style="text-align:right">NT$ ${fmtMoney(subtotal)}</td></tr>
+         <tr><td colspan="${q.isLen ? 5 : 4}">稅金（5%）</td><td style="text-align:right">NT$ ${fmtMoney(tax)}</td></tr>
+         <tr style="font-weight:700;background:#f2f2f2"><td colspan="${q.isLen ? 5 : 4}">含稅總計</td><td style="text-align:right;font-weight:700">NT$ ${fmtMoney(grand)}</td></tr>`
+      : `<tr style="font-weight:700;background:#f2f2f2"><td colspan="${q.isLen ? 5 : 4}">合計金額</td><td style="text-align:right;font-weight:700">—</td></tr>`;
     const body = `
       <div class="doc-title">印製確認單</div>
       <div class="doc-sub">Aceeprint 愛色智能印刷 · PRODUCTION CONFIRMATION</div>
@@ -741,7 +749,7 @@ function exportConfirmXlsx(o) {
             : `<td style="text-align:center">${r.qty}</td><td style="text-align:right">${r.price ? fmtMoney(r.price) : ""}</td><td style="text-align:right">${r.amt ? fmtMoney(r.amt) : ""}</td><td></td>`}
         </tr>`).join("")}
         ${q.isLen && q.totalLen ? `<tr style="font-weight:700"><td colspan="3">合計總長度</td><td style="text-align:center">${fmtDec(q.totalLen)} m</td><td colspan="2"></td></tr>` : ""}
-        <tr style="font-weight:700;background:#f2f2f2"><td colspan="${q.isLen ? 5 : 4}">合計金額</td><td style="text-align:right;font-weight:700">${q.total ? "NT$ " + fmtMoney(q.total) : "—"}</td></tr>
+        ${totalRows}
       </table>
       <div class="sec-h">備註</div>
       <div style="min-height:30px;font-size:12px;line-height:1.7">
