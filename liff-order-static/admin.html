@@ -753,9 +753,7 @@ function exportConfirmXlsx(o) {
       </table>
       <div class="sec-h">備註</div>
       <div style="min-height:30px;font-size:12px;line-height:1.7">
-        1. 若有疑問請與業務專員確認。<br />
-        2. 請於收到本單後 7 日內確認，逾期價格可能變動。<br />
-        3. ${esc(o.notes || "無")}
+        1. 若有疑問請與業務專員確認。
       </div>
       <div class="sig"><div>業務報價（簽名 / 日期）</div><div>客戶確認（簽名 / 日期）</div></div>`;
     openDoc("印製確認單", body, o.order_no);
