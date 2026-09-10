@@ -679,6 +679,80 @@ function exportConfirmXlsx(o) {
     openDoc("品管確認單", body, o.order_no);
   }
 
+  /* ---- 報價單（傳給客戶確認） ---- */
+  function quoteRows(o) {
+    const conf = confFor(o.order_no);
+    const files = o.files || [];
+    const isLen = getFilePrefix(o.product_type) === "DTFR";
+    const unit = unitOf(o);
+    const [w1, l1] = parseDim(o.size);
+    let rows, total;
+    if (isLen) {
+      rows = files.map((f, i) => {
+        const len = Number(conf.rows[i]?.len) || (Number(l1) || 0);
+        const price = Number(conf.price) || 0;
+        return { i: i + 1, name: f.name, qty: f.qty || 1, w: w1 ?? "", len, price, amt: len * price };
+      });
+      total = rows.reduce((s, r) => s + r.amt, 0);
+      return { rows, total, isLen, totalLen: rows.reduce((s, r) => s + (Number(r.len) || 0), 0) };
+    }
+    rows = files.map((f, i) => {
+      const price = Number(conf.rows[i]?.price) || 0;
+      return { i: i + 1, name: f.name, qty: f.qty || 1, w: "", len: "", price, amt: (f.qty || 1) * price };
+    });
+    total = rows.reduce((s, r) => s + r.amt, 0);
+    return { rows, total, isLen, totalLen: 0 };
+  }
+  function printQuote(o) {
+    const q = quoteRows(o);
+    const unit = unitOf(o);
+    const date = new Date();
+    const qno = "Q-" + o.order_no;
+    const body = `
+      <div class="doc-title">報價單</div>
+      <div class="doc-sub">Aceeprint 愛色智能印刷 · QUOTATION</div>
+      <table class="grid">
+        <colgroup><col style="width:18%"><col style="width:32%"><col style="width:18%"><col style="width:32%"></colgroup>
+        <tbody>
+          <tr><td class="lbl">報價單編號</td><td class="val">${esc(qno)}</td><td class="lbl">報價日期</td><td class="val">${esc(fmtDate(date.toISOString()))}</td></tr>
+          <tr><td class="lbl">客戶名稱</td><td class="val">${esc(o.customer_name)}</td><td class="lbl">聯絡人</td><td class="val">${esc(o.contact_name || "")}</td></tr>
+          <tr><td class="lbl">電話</td><td class="val">${esc(o.phone || "")}</td><td class="lbl">統編</td><td class="val">${esc(o.tax_id || "")}</td></tr>
+        </tbody>
+      </table>
+      <div class="sec-h">訂單資訊</div>
+      ${pairRows([
+        ["訂單編號", o.order_no],
+        ["產品類型", o.product_type],
+        ["尺寸", o.size],
+        ["材質", o.material],
+        ["後加工", o.finish],
+        ["緊急程度", o.priority],
+        ["交貨日", o.due_date],
+      ])}
+      <div class="sec-h">報價明細</div>
+      <table class="grid">
+        <colgroup><col style="width:6%"><col style="width:36%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:16%"></colgroup>
+        <tr><th>序</th><th>圖檔</th>${q.isLen ? `<th>寬(mm)</th><th>長度(m)</th><th>單價(NT$/m)</th><th>金額(NT$)</th>` : `<th>數量(${unit})</th><th>單價(NT$/${unit})</th><th>金額(NT$)</th><th></th>`}</tr>
+        ${q.rows.map(r => `<tr>
+          <td style="text-align:center">${r.i}</td>
+          <td>${esc(r.name)}</td>
+          ${q.isLen
+            ? `<td style="text-align:center">${esc(r.w)}</td><td style="text-align:center">${r.len ? fmtDec(r.len) : ""}</td><td style="text-align:right">${r.price ? fmtMoney(r.price) : ""}</td><td style="text-align:right">${r.amt ? fmtMoney(r.amt) : ""}</td>`
+            : `<td style="text-align:center">${r.qty}</td><td style="text-align:right">${r.price ? fmtMoney(r.price) : ""}</td><td style="text-align:right">${r.amt ? fmtMoney(r.amt) : ""}</td><td></td>`}
+        </tr>`).join("")}
+        ${q.isLen && q.totalLen ? `<tr style="font-weight:700"><td colspan="3">合計總長度</td><td style="text-align:center">${fmtDec(q.totalLen)} m</td><td colspan="2"></td></tr>` : ""}
+        <tr style="font-weight:700;background:#f2f2f2"><td colspan="${q.isLen ? 5 : 4}">合計金額</td><td style="text-align:right;font-weight:700">${q.total ? "NT$ " + fmtMoney(q.total) : "—"}</td></tr>
+      </table>
+      <div class="sec-h">備註</div>
+      <div style="min-height:30px;font-size:12px;line-height:1.7">
+        1. 若有疑問請與業務專員確認。<br />
+        2. 請於收到報價單後 7 日內確認，逾期價格可能變動。<br />
+        3. ${esc(o.notes || "無")}
+      </div>
+      <div class="sig"><div>業務報價（簽名 / 日期）</div><div>客戶確認（簽名 / 日期）</div></div>`;
+    openDoc("報價單", body, o.order_no);
+  }
+
   function confirmSection(o, idx) {
     const conf = confFor(o.order_no);
     const isDtfr = getFilePrefix(o.product_type) === "DTFR";
@@ -820,6 +894,7 @@ function exportConfirmXlsx(o) {
         <div class="pb-row">
           <button class="pb-work" onclick="printWork(orders[${idx}])">W 派工單</button>
           <button class="pb-qc" onclick="printQc(orders[${idx}])">QC 品管確認單</button>
+          <button class="pb-qc" style="background:#1d5f8f" onclick="printQuote(orders[${idx}])">Q 報價單</button>
         </div>
         <div class="manage-row" data-no="${esc(o.order_no)}">
           <select class="m-status" onchange="saveManage(orders[${idx}], this)">
