@@ -153,15 +153,14 @@ body {
   -webkit-appearance: none; appearance: none;
   min-height: var(--touch);
 }
-/* 三階層級視覺區分：大類(藍) / 子類(綠) / 規格(琥珀) */
-.cascade-selects select.cs-cat { background: #e8f1fb; border-color: #a8c8ea; font-weight: 600; }
-.cascade-selects select.cs-sub { background: #eaf5ec; border-color: #b2d6bb; }
-.cascade-selects select.cs-spec { background: #fdf4e6; border-color: #e6cfa5; }
-.cascade-selects select.cs-cat:focus { background: #e8f1fb; }
-.cascade-selects select.cs-sub:focus { background: #eaf5ec; }
-.cascade-selects select.cs-spec:focus { background: #fdf4e6; }
-.cascade-selects select:focus { border-color: var(--fg); box-shadow: var(--focus-ring); }
+/* 三階下拉皆同一底色 */
+.cascade-selects select { background: #eef4fa; border-color: #b7cddd; }
+.cascade-selects select:focus { border-color: var(--fg); box-shadow: var(--focus-ring); background: #eef4fa; }
+/* 佔位選項（大類/子類/規格）與實際選項（紡織、UV…）視覺區分 */
+.cascade-selects select option[value=""] { color: var(--muted); font-style: italic; font-weight: 400; background: #ffffff; }
+.cascade-selects select option:not([value=""]) { color: var(--fg); font-weight: 600; background: #e7f0f8; }
 .cascade-selects select:disabled { background: var(--surface); color: var(--muted); cursor: not-allowed; }
+.cascade-selects select:disabled option:not([value=""]) { color: var(--muted); font-weight: 400; background: var(--surface); }
 @media (max-width: 480px) { .cascade-selects { grid-template-columns: 1fr; } }
 
 /* ============ 區塊標題（步驟二） ============ */
