@@ -398,10 +398,10 @@
   function getFilePrefix(productType) {
     const p = String(productType || "");
     if (p.includes("R to R")) return "DTFR";
-    if (p.includes("A3")) return "DTFA";
     if (p.includes("紡織") && p.includes("直噴")) return "DTG";
     if (p.includes("燙金")) return "UVDTFG";
     if (p.includes("水晶標")) return "UVF";
+    if (p.includes("A3")) return "DTFA";
     if (p.includes("UV") && p.includes("直噴")) return "UVDTO";
     return "QT";
   }
