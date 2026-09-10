@@ -658,7 +658,7 @@ function renderSummary() {
     ["產品類型", d.product_type],
 ["材質", d.material || "—"],
     ["後加工", d.finish || "—"],
-    ["緊急", d.priority || "—"],
+    ["時效等級", d.priority || "—"],
     ["交貨日", d.due_date || "—"],
     ["備註", d.notes || "—"],
   ];

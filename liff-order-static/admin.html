@@ -741,7 +741,7 @@ function exportConfirmXlsx(o) {
         ["尺寸", o.size],
         ["材質", o.material],
         ["後加工", o.finish],
-        ["緊急程度", o.priority],
+        ["時效等級", o.priority],
         ["交貨日", o.due_date],
       ])}
       <div class="sec-h">報價明細</div>
@@ -889,7 +889,7 @@ function exportConfirmXlsx(o) {
           ${kv("尺寸", o.size)}
           ${kv("材質", o.material)}
           ${kv("後加工", o.finish)}
-          ${kv("緊急程度", o.priority)}
+          ${kv("時效等級", o.priority)}
           ${kv("交貨日", o.due_date)}
           ${kv("物流", o.logistics_method)}
           ${addr}
