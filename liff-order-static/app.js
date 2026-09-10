@@ -78,12 +78,23 @@ const PRODUCT_FILE_TYPES = {
   "紡織 - DTF - 60cm R to R": [".png", ".ai", ".pdf", ".psd"],
   "紡織 - DTF - A3": [".png"],
   "紡織 - 直噴": [".png"],
-  "UV - 一般水晶標": [".pdf", ".ai", ".psd"],
-  "UV - 一般水晶標 - A3": [".pdf", ".ai", ".psd"],
-  "UV - 燙金水晶標": [".pdf", ".ai", ".psd"],
-  "UV - 燙金水晶標 - A3": [".pdf", ".ai", ".psd"],
-  "UV - 燙金水晶標 - A4": [".pdf", ".ai", ".psd"],
-  "UV - 直噴": [".pdf", ".ai", ".psd"],
+  "UV - 一般水晶標": [".ai", ".pdf", ".psd", ".png"],
+  "UV - 一般水晶標 - A3": [".ai", ".pdf", ".psd", ".png"],
+  "UV - 燙金水晶標": [".ai", ".pdf", ".psd", ".png"],
+  "UV - 燙金水晶標 - A3": [".ai", ".pdf", ".psd", ".png"],
+  "UV - 燙金水晶標 - A4": [".ai", ".pdf", ".psd", ".png"],
+  "UV - 直噴": [".ai", ".pdf", ".psd", ".png"],
+};
+
+// 依產品類型顯示的上傳說明（未定義時用通用文字）
+const PRODUCT_HINTS = {
+  "紡織 - DTF - 60cm R to R": "檔案尺寸：寬570mm內，長度以不超1500mm為佳。解析度為300DPI，色彩模式為CMYK。",
+  "紡織 - DTF - A3": "檔案尺寸：寬280mm內，長度380mm內。解析度為300DPI，色彩模式為CMYK。",
+  "紡織 - 直噴": "檔案尺寸：寬350mm內，長度450mm內。解析度為300DPI，色彩模式為CMYK。",
+  "UV - 一般水晶標 - A3": "檔案尺寸：寬280mm內，長度380mm內。解析度為300DPI，色彩模式為CMYK，請一定要去背。",
+  "UV - 燙金水晶標 - A3": "檔案尺寸：寬280mm內，長度380mm內。解析度為300DPI，色彩模式為CMYK，請一定要去背。無註明一律以金箔製作。",
+  "UV - 燙金水晶標 - A4": "檔案尺寸：寬190mm內，長度280mm內。解析度為300DPI，色彩模式為CMYK，請一定要去背。無註明一律以金箔製作。",
+  "UV - 直噴": "檔案尺寸：寬600mm內，長度900mm內。解析度為300DPI，色彩模式為CMYK。",
 };
 
 // 全部產品共通的可用類型（未選產品或未定義規則時的預設）
@@ -111,7 +122,10 @@ function updateFileTypes() {
   const ext = currentAllowedExts();
   fileInput.accept = ext.join(",");
   const hint = document.getElementById("fileHint");
-  if (hint) hint.textContent = `此產品僅接受 ${fmtExts(ext)}；單檔最大 ${CONFIG.MAX_FILE_MB}MB、一單最多 ${CONFIG.MAX_FILE_COUNT} 個，可一次多選；上傳後可設定每個檔案的印製數量（預設 1）。`;
+  const pt = document.getElementById("productTypeHidden")?.value || "";
+  const baseText = `此產品僅接受 ${fmtExts(ext)}；單檔最大 ${CONFIG.MAX_FILE_MB}MB、一單最多 ${CONFIG.MAX_FILE_COUNT} 個，可一次多選；`;
+  const extra = PRODUCT_HINTS[pt] || "上傳後可設定每個檔案的印製數量（預設 1）。";
+  if (hint) hint.textContent = baseText + extra;
   sweepFilesByProduct();
 }
 

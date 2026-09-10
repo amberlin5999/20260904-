@@ -209,12 +209,12 @@ const PRODUCT_FILE_TYPES = {
   "紡織 - DTF - 60cm R to R": [".png", ".ai", ".pdf", ".psd"],
   "紡織 - DTF - A3": [".png"],
   "紡織 - 直噴": [".png"],
-  "UV - 一般水晶標": [".pdf", ".ai", ".psd"],
-  "UV - 一般水晶標 - A3": [".pdf", ".ai", ".psd"],
-  "UV - 燙金水晶標": [".pdf", ".ai", ".psd"],
-  "UV - 燙金水晶標 - A3": [".pdf", ".ai", ".psd"],
-  "UV - 燙金水晶標 - A4": [".pdf", ".ai", ".psd"],
-  "UV - 直噴": [".pdf", ".ai", ".psd"],
+  "UV - 一般水晶標": [".ai", ".pdf", ".psd", ".png"],
+  "UV - 一般水晶標 - A3": [".ai", ".pdf", ".psd", ".png"],
+  "UV - 燙金水晶標": [".ai", ".pdf", ".psd", ".png"],
+  "UV - 燙金水晶標 - A3": [".ai", ".pdf", ".psd", ".png"],
+  "UV - 燙金水晶標 - A4": [".ai", ".pdf", ".psd", ".png"],
+  "UV - 直噴": [".ai", ".pdf", ".psd", ".png"],
 };
 
 // 訂單編號：YYYYMMDD###（依台灣時區，“當天第幾筆”遞增，PK 衝突重試）
