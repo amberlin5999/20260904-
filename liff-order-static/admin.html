@@ -709,8 +709,8 @@ function exportConfirmXlsx(o) {
     const date = new Date();
     const qno = "Q-" + o.order_no;
     const body = `
-      <div class="doc-title">報價單</div>
-      <div class="doc-sub">Aceeprint 愛色智能印刷 · QUOTATION</div>
+      <div class="doc-title">印製確認單</div>
+      <div class="doc-sub">Aceeprint 愛色智能印刷 · PRODUCTION CONFIRMATION</div>
       <table class="grid">
         <colgroup><col style="width:18%"><col style="width:32%"><col style="width:18%"><col style="width:32%"></colgroup>
         <tbody>
@@ -746,11 +746,11 @@ function exportConfirmXlsx(o) {
       <div class="sec-h">備註</div>
       <div style="min-height:30px;font-size:12px;line-height:1.7">
         1. 若有疑問請與業務專員確認。<br />
-        2. 請於收到報價單後 7 日內確認，逾期價格可能變動。<br />
+        2. 請於收到本單後 7 日內確認，逾期價格可能變動。<br />
         3. ${esc(o.notes || "無")}
       </div>
       <div class="sig"><div>業務報價（簽名 / 日期）</div><div>客戶確認（簽名 / 日期）</div></div>`;
-    openDoc("報價單", body, o.order_no);
+    openDoc("印製確認單", body, o.order_no);
   }
 
   function confirmSection(o, idx) {
@@ -894,7 +894,7 @@ function exportConfirmXlsx(o) {
         <div class="pb-row">
           <button class="pb-work" onclick="printWork(orders[${idx}])">W 派工單</button>
           <button class="pb-qc" onclick="printQc(orders[${idx}])">QC 品管確認單</button>
-          <button class="pb-qc" style="background:#1d5f8f" onclick="printQuote(orders[${idx}])">Q 報價單</button>
+          <button class="pb-qc" style="background:#1d5f8f" onclick="printQuote(orders[${idx}])">Q 印製確認單</button>
         </div>
         <div class="manage-row" data-no="${esc(o.order_no)}">
           <select class="m-status" onchange="saveManage(orders[${idx}], this)">
