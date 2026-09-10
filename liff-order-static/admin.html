@@ -713,7 +713,7 @@ function exportConfirmXlsx(o) {
     const subtotal = q.total || 0;
     const freightLbl = freight > 0 ? `運費（${esc(logistics)}）` : "";
     const amountBase = (subtotal > 0 || freight > 0) ? subtotal + freight : 0;
-    const tax = amountBase > 0 ? amountBase * 0.05 : 0;
+    const tax = amountBase > 0 ? Math.round(amountBase * 0.05) : 0;
     const grand = amountBase > 0 ? amountBase + tax : 0;
     const totalRows =
       amountBase > 0
