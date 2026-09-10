@@ -708,14 +708,21 @@ function exportConfirmXlsx(o) {
     const unit = unitOf(o);
     const date = new Date();
     const qno = "Q-" + o.order_no;
+    const logistics = String(o.logistics_method || "");
+    const freight = logistics.includes("順豐") ? 100 : (logistics.includes("超商") || logistics.includes("門市") ? 60 : 0);
     const subtotal = q.total || 0;
-    const tax = subtotal > 0 ? subtotal * 0.05 : 0;
-    const grand = subtotal > 0 ? subtotal + tax : 0;
-    const totalRows = subtotal > 0
-      ? `<tr><td colspan="${q.isLen ? 5 : 4}">合計金額（未稅）</td><td style="text-align:right">NT$ ${fmtMoney(subtotal)}</td></tr>
-         <tr><td colspan="${q.isLen ? 5 : 4}">稅金（5%）</td><td style="text-align:right">NT$ ${fmtMoney(tax)}</td></tr>
-         <tr style="font-weight:700;background:#f2f2f2"><td colspan="${q.isLen ? 5 : 4}">含稅總計</td><td style="text-align:right;font-weight:700">NT$ ${fmtMoney(grand)}</td></tr>`
-      : `<tr style="font-weight:700;background:#f2f2f2"><td colspan="${q.isLen ? 5 : 4}">合計金額</td><td style="text-align:right;font-weight:700">—</td></tr>`;
+    const freightLbl = freight > 0 ? `運費（${esc(logistics)}）` : "";
+    const amountBase = (subtotal > 0 || freight > 0) ? subtotal + freight : 0;
+    const tax = amountBase > 0 ? amountBase * 0.05 : 0;
+    const grand = amountBase > 0 ? amountBase + tax : 0;
+    const totalRows =
+      amountBase > 0
+        ? `${subtotal > 0 ? `<tr><td colspan="${q.isLen ? 5 : 4}">合計金額（未稅）</td><td style="text-align:right">NT$ ${fmtMoney(subtotal)}</td></tr>` : ""}
+           ${freight > 0 ? `<tr><td colspan="${q.isLen ? 5 : 4}">${freightLbl}</td><td style="text-align:right">NT$ ${fmtMoney(freight)}</td></tr>` : ""}
+           ${(subtotal > 0 && freight > 0) ? `<tr><td colspan="${q.isLen ? 5 : 4}">含運合計（未稅）</td><td style="text-align:right">NT$ ${fmtMoney(amountBase)}</td></tr>` : ""}
+           <tr><td colspan="${q.isLen ? 5 : 4}">稅金（5%）</td><td style="text-align:right">NT$ ${fmtMoney(tax)}</td></tr>
+           <tr style="font-weight:700;background:#f2f2f2"><td colspan="${q.isLen ? 5 : 4}">含稅總計</td><td style="text-align:right;font-weight:700">NT$ ${fmtMoney(grand)}</td></tr>`
+        : `<tr style="font-weight:700;background:#f2f2f2"><td colspan="${q.isLen ? 5 : 4}">合計金額</td><td style="text-align:right;font-weight:700">—</td></tr>`;
     const body = `
       <div class="doc-title">印製確認單</div>
       <div class="doc-sub">Aceeprint 愛色智能印刷 · PRODUCTION CONFIRMATION</div>
