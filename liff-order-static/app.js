@@ -422,7 +422,7 @@ document.addEventListener("change", (e) => {
 
 const PRIORITY_HINTS = {
   "一般": "以取件日為準，正常為三個工作天完成",
-  "急件": "在 1 個工作天內完成",
+  "急件": "在 1 個工作天內完成，需等我們回覆始成立訂單",
   "特急": "3小時內完成，需加「加急」處理費",
 };
 function updatePriorityHint() {
