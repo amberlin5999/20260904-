@@ -776,16 +776,20 @@ function exportConfirmXlsx(o) {
     if (!confirm(`為訂單 #${o.order_no} 建立順豐運單？\n（將通知順豐收派員上門收件）`)) return;
     const btn = event && event.target;
     if (btn) { btn.disabled = true; btn.textContent = "開單中…"; }
+    let data = {};
     try {
       const r = await fetch(api + "/api/orders/" + encodeURIComponent(o.order_no) + "/sf-waybill", {
         method: "POST",
         headers: getAuthHeaders(),
       });
-      const data = await r.json();
+      data = await r.json();
       if (!r.ok) throw new Error(data.error || "開單失敗");
       alert(`運單已建立！\n運單號：${data.waybill_no}`);
       load();
-    } catch (e) { alert("順豐開單失敗：" + e.message); }
+    } catch (e) {
+      const raw = data.raw ? "\n原始回應：\n" + JSON.stringify(data.raw).slice(0, 600) : "";
+      alert("順豐開單失敗：" + e.message + raw);
+    }
     if (btn) { btn.disabled = false; btn.textContent = "SF 開運單"; }
   }
   function printSf(o) {

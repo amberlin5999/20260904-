@@ -1,23 +1,25 @@
 name = "shubei-liff-order"
 main = "src/index.js"
 compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
 
 [vars]
 MAX_FILE_MB = "95"
 ZIP_MAX_MB = "95"
 
-# 順豐速運電子運單憑證（向順豐開放平台申請）
-# 因屬敏感資訊，改以 wrangler secret 儲存（wrangler secret put SF_PARTNER_ID 等）
-SF_ENV = "sandbox"
+# 順豐 IUOP 電子運單：
+# 敏感憑證以 wrangler secret 儲存（SF_APP_KEY / SF_APP_SECRET / SF_AES_KEY / SF_CUSTOMER_CODE / SF_MONTHLY_CARD）
+# msgType 依要下單的接口調整（IUOP_CREATE_ORDER / IECS_CREATE_ORDER …）
+SF_MSG_TYPE = "IUOP_CREATE_ORDER"
 
-# 寄件人（公司）資料——託運單上這欄要正確
-SF_SENDER_COMPANY = "數倍DTF"
-SF_SENDER_CONTACT = ""
-SF_SENDER_MOBILE = ""
-SF_SENDER_PROVINCE = ""
-SF_SENDER_CITY = ""
+# 寄件人（店家）資料——託運單上這欄要正確
+SF_SENDER_COMPANY = "數倍科技"
+SF_SENDER_CONTACT = "數倍科技"
+SF_SENDER_MOBILE = "0921053426"
+SF_SENDER_PROVINCE = "新北市"
+SF_SENDER_CITY = "新店區"
 SF_SENDER_COUNTY = ""
-SF_SENDER_ADDRESS = ""
+SF_SENDER_ADDRESS = "寶興路45巷9弄1號2樓"
 
 # 前端網域；要暫時允許本機測試時，加進 CORS_ORIGINS
 CORS_ORIGINS = "https://aceeprint.vercel.app"

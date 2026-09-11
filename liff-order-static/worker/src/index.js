@@ -11,6 +11,9 @@
 //   GET  /api/health                          → 健康檢查
 //   POST /webhook/line                         → LINE Messaging API webhook（200 收受，暫不回應）
 
+// 順豐 IUOP AES-256-CBC（NoPadding）加解密需用 node:crypto（WebCrypto AES-CBC 會自補 PKCS7）
+import { createCipheriv, createDecipheriv } from "node:crypto";
+
 const SHARED = {
   "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, x-admin-token, Authorization, X-File-Name, X-File-Qty",
@@ -571,147 +574,205 @@ async function downloadZip(env, no) {
   ];
 }
 
-/* ---------- 順豐速運（EXP_RECE_CREATE_ORDER 電子運單） ----------
- * 憑證（wrangler.toml [vars]）：
- *   SF_PARTNER_ID   顧客編碼（clientCode）
- *   SF_CHECK_WORD   校驗碼（checkWord，簽名用）
- *   SF_MONTHLY_CARD 月結卡號（寄方付必要；沙箱留空）
- *   SF_ENV          sandbox（預設）| prod
- *   SF_SENDER_*     寄件人（公司）地址／聯絡資料
- * 簽名：msgDigest = base64( MD5( urlEncodeJava( msgData + timestamp + checkWord ) ) )
+/* ---------- 順豐 IUOP（api-ifsp.sf.global 國際統一訂單平台） ----------
+ * 憑證（wrangler secret）：
+ *   SF_APP_KEY         應用 Key
+ *   SF_APP_SECRET      應用 Secret
+ *   SF_CUSTOMER_CODE   顧客編碼
+ *   SF_AES_KEY         AES 加密密鑰（43 字元）
+ *   SF_MONTHLY_CARD    月結卡號（寄方付）
+ * 流程：
+ *   1. GET  /openapi/api/token?appKey&appSecret → accessToken（expireIn 秒，記憶體快取）
+ *   2. 明文 JSON → 自訂 AES-256-CBC（NoPadding）：
+ *      random(16) + BE32(text 長度) + text + appKey + PKCS7 補到 32 之倍數
+ *      key = base64(aesKey + "=")，iv = key 前 16 位元組
+ *   3. signature = hex( SHA256( sort([token,timestamp,nonce,密文]).join("") ) )
+ *   4. POST /openapi/api/dispatch，header：Content-Type + msgType/appKey/token/timestamp/nonce/signature/lang
+ *   5. 回應若為密文則以同一 AES 解密後再解析 JSON
  */
-const SF_ENDPOINTS = {
-  sandbox: "https://sfapi-sbox.sf-express.com/std/service",
-  prod: "https://sfapi.sf-express.com/std/service",
-};
+const IUOP_TOKEN_URL = "https://api-ifsp.sf.global/openapi/api/token";
+const IUOP_DISPATCH_URL = "https://api-ifsp.sf.global/openapi/api/dispatch";
 
-// MD5（RFC 1321，blueimp 結構，無 Node 相依；Workers 無 MD5 digest）
-function md5Hex(inputString) {
-  var add32 = function (a, b) { return (a + b) & 0xffffffff; };
-  var cmn = function (q, a, b, x, s, t) { a = add32(add32(a, q), add32(x, t)); return add32((a << s) | (a >>> (32 - s)), b); };
-  var ff = function (a, b, c, d, x, s, t) { return cmn((b & c) | (~b & d), a, b, x, s, t); };
-  var gg = function (a, b, c, d, x, s, t) { return cmn((b & d) | (c & ~d), a, b, x, s, t); };
-  var hh = function (a, b, c, d, x, s, t) { return cmn(b ^ c ^ d, a, b, x, s, t); };
-  var ii = function (a, b, c, d, x, s, t) { return cmn(c ^ (b | ~d), a, b, x, s, t); };
-  var md5cycle = function (x, k) {
-    var a = x[0], b = x[1], c = x[2], d = x[3];
-    a = ff(a, b, c, d, k[0], 7, -680876936); d = ff(d, a, b, c, k[1], 12, -389564586); c = ff(c, d, a, b, k[2], 17, 606105819); b = ff(b, c, d, a, k[3], 22, -1044525330);
-    a = ff(a, b, c, d, k[4], 7, -176418897); d = ff(d, a, b, c, k[5], 12, 1200080426); c = ff(c, d, a, b, k[6], 17, -1473231341); b = ff(b, c, d, a, k[7], 22, -45705983);
-    a = ff(a, b, c, d, k[8], 7, 1770035416); d = ff(d, a, b, c, k[9], 12, -1958414417); c = ff(c, d, a, b, k[10], 17, -42063); b = ff(b, c, d, a, k[11], 22, -1990404162);
-    a = ff(a, b, c, d, k[12], 7, 1804603682); d = ff(d, a, b, c, k[13], 12, -40341101); c = ff(c, d, a, b, k[14], 17, -1502002290); b = ff(b, c, d, a, k[15], 22, 1236535329);
-    a = gg(a, b, c, d, k[1], 5, -165796510); d = gg(d, a, b, c, k[6], 9, -1069501632); c = gg(c, d, a, b, k[11], 14, 643717713); b = gg(b, c, d, a, k[0], 20, -373897302);
-    a = gg(a, b, c, d, k[5], 5, -701558691); d = gg(d, a, b, c, k[10], 9, 38016083); c = gg(c, d, a, b, k[15], 14, -660478335); b = gg(b, c, d, a, k[4], 20, -405537848);
-    a = gg(a, b, c, d, k[9], 5, 568446438); d = gg(d, a, b, c, k[14], 9, -1019803690); c = gg(c, d, a, b, k[3], 14, -187363961); b = gg(b, c, d, a, k[8], 20, 1163531501);
-    a = gg(a, b, c, d, k[13], 5, -1444681467); d = gg(d, a, b, c, k[2], 9, -51403784); c = gg(c, d, a, b, k[7], 14, 1735328473); b = gg(b, c, d, a, k[12], 20, -1926607734);
-    a = hh(a, b, c, d, k[5], 4, -378558); d = hh(d, a, b, c, k[8], 11, -2022574463); c = hh(c, d, a, b, k[11], 16, 1839030562); b = hh(b, c, d, a, k[14], 23, -35309556);
-    a = hh(a, b, c, d, k[1], 4, -1530992060); d = hh(d, a, b, c, k[4], 11, 1272893353); c = hh(c, d, a, b, k[7], 16, -155497632); b = hh(b, c, d, a, k[10], 23, -1094730640);
-    a = hh(a, b, c, d, k[13], 4, 681279174); d = hh(d, a, b, c, k[0], 11, -358537222); c = hh(c, d, a, b, k[3], 16, -722521979); b = hh(b, c, d, a, k[6], 23, 76029189);
-    a = hh(a, b, c, d, k[9], 4, -640364487); d = hh(d, a, b, c, k[12], 11, -421815835); c = hh(c, d, a, b, k[15], 16, 530742520); b = hh(b, c, d, a, k[2], 23, -995338651);
-    a = ii(a, b, c, d, k[0], 6, -198630844); d = ii(d, a, b, c, k[7], 10, 1126891415); c = ii(c, d, a, b, k[14], 15, -1416354905); b = ii(b, c, d, a, k[5], 21, -57434055);
-    a = ii(a, b, c, d, k[12], 6, 1700485571); d = ii(d, a, b, c, k[3], 10, -1894986606); c = ii(c, d, a, b, k[10], 15, -1051523); b = ii(b, c, d, a, k[1], 21, -2054922799);
-    a = ii(a, b, c, d, k[8], 6, 1873313359); d = ii(d, a, b, c, k[15], 10, -30611744); c = ii(c, d, a, b, k[6], 15, -1560198380); b = ii(b, c, d, a, k[13], 21, 1309151649);
-    a = ii(a, b, c, d, k[4], 6, -145523070); d = ii(d, a, b, c, k[11], 10, -1120210379); c = ii(c, d, a, b, k[2], 15, 718787259); b = ii(b, c, d, a, k[9], 21, -343485551);
-    x[0] = add32(a, x[0]); x[1] = add32(b, x[1]); x[2] = add32(c, x[2]); x[3] = add32(d, x[3]);
-  };
-  var md51 = function (s) {
-    var n = s.length, state = [1732584193, -271733879, -1732584194, 271733878], i;
-    for (i = 64; i <= s.length; i += 64) { md5cycle(state, md5blk(s.substring(i - 64, i))); }
-    s = s.substring(i - 64);
-    var tail = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    for (i = 0; i < s.length; i++) tail[i >> 2] |= s.charCodeAt(i) << ((i % 4) << 3);
-    tail[i >> 2] |= 0x80 << ((i % 4) << 3);
-    if (i > 55) { md5cycle(state, tail); for (i = 0; i < 16; i++) tail[i] = 0; }
-    tail[14] = n * 8;
-    md5cycle(state, tail);
-    return state;
-  };
-  var md5blk = function (s) {
-    var md5blks = [], i;
-    for (i = 0; i < 64; i += 4) md5blks[i >> 2] = s.charCodeAt(i) + (s.charCodeAt(i + 1) << 8) + (s.charCodeAt(i + 2) << 16) + (s.charCodeAt(i + 3) << 24);
-    return md5blks;
-  };
-  var rhex = function (n) { var s = "", j; for (j = 0; j < 4; j++) s += hexChr[(n >> (j * 8 + 4)) & 0x0f] + hexChr[(n >> (j * 8)) & 0x0f]; return s; };
-  var hexChr = "0123456789abcdef".split("");
-  var raw = encodeURIComponent(inputString).replace(/%([0-9A-F]{2})/g, function (_, h) { return String.fromCharCode(parseInt(h, 16)); });
-  return md51(raw).map(rhex).join("");
+let iuopTokenCache = { token: "", exp: 0 };
+
+async function iuopGetToken(env) {
+  if (iuopTokenCache.token && Date.now() < iuopTokenCache.exp - 120000)
+    return iuopTokenCache.token;
+  const url = `${IUOP_TOKEN_URL}?appKey=${env.SF_APP_KEY}&appSecret=${env.SF_APP_SECRET}`;
+  const res = await fetch(url);
+  const text = await res.text();
+  let j;
+  try { j = JSON.parse(text); } catch (e) { throw new Error("順豐 token 回應非 JSON：" + text.slice(0, 200)); }
+  if (j.apiResultCode !== 0)
+    throw new Error("取得順豐 token 失敗：" + (j.apiErrorMsg || j.apiResultDesc || JSON.stringify(j).slice(0, 200)));
+  const expIn = Number(j.apiResultData && j.apiResultData.expireIn) || 7200;
+  iuopTokenCache = { token: j.apiResultData.accessToken, exp: Date.now() + expIn * 1000 };
+  return iuopTokenCache.token;
 }
-function hexToB64(hex) {
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function bytesToB64(bytes) {
   let bin = "";
-  for (let i = 0; i < hex.length; i += 2) bin += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
   return btoa(bin);
 }
-function urlEncodeJava(s) {
-  return encodeURIComponent(s)
-    .replace(/%20/g, "+")
-    .replace(/!/g, "%21")
-    .replace(/'/g, "%27")
-    .replace(/\(/g, "%28")
-    .replace(/\)/g, "%29")
-    .replace(/~/g, "%7E");
-}
-function sfMsgDigest(msgData, timestamp, checkWord) {
-  return hexToB64(md5Hex(urlEncodeJava(msgData + timestamp + checkWord)));
-}
-function parseTwAddress(addr) {
-  const s = String(addr || "").trim();
-  const m = s.match(/^(臺?[^縣市]{1,3}[縣市])([^鄉鎮市區]{1,4}[鄉鎮市區])?(.*)$/);
-  if (!m) return { province: "", city: "", county: "", line: s };
-  return { province: m[1] || "", city: m[2] || "", county: "", line: (m[3] || "").trim() };
-}
+
 function uuidHex() {
   const b = crypto.getRandomValues(new Uint8Array(16));
   let s = "";
   for (let i = 0; i < 16; i++) s += b[i].toString(16).padStart(2, "0");
   return s;
 }
-function buildSfOrderPayload(order, env) {
-  const r = parseTwAddress(order.recipient_address || order.rv_addr || order.rv_address || "");
-  const fileCount = (order.files || [])
-    .reduce((sum, f) => sum + (Number(f.qty) || 1), 0) || 1;
-  return {
-    language: "zh-CN",
-    orderId: order.order_no,
-    cargoDetails: [
-      { name: "影印打印成品", count: fileCount, unit: "件", weight: 1 },
-    ],
-    contactInfoList: [
-      {
-        contactType: 1, country: "TW",
-        company: env.SF_SENDER_COMPANY || "數倍DTF",
-        contact: env.SF_SENDER_CONTACT || "",
-        mobile: env.SF_SENDER_MOBILE || "",
-        province: env.SF_SENDER_PROVINCE || "",
-        city: env.SF_SENDER_CITY || "",
-        county: env.SF_SENDER_COUNTY || "",
-        address: env.SF_SENDER_ADDRESS || "",
-      },
-      {
-        contactType: 2, country: "TW",
-        contact: order.recipient_name || order.rv_name || "",
-        mobile: order.recipient_phone || order.rv_phone || "",
-        province: r.province, city: r.city, county: r.county,
-        address: order.recipient_address || order.rv_addr || order.rv_address || "",
-      },
-    ],
-    expressTypeId: Number(env.SF_EXPRESS_TYPE_ID || 1),
-    payMethod: 1,
-    monthlyCard: env.SF_MONTHLY_CARD || "",
-    parcelQty: 1,
-    totalWeight: 1,
-    isDocall: 1,
-  };
+
+// 順豐 IUOP：AES-256-CBC（NoPadding）加密 → base64 密文
+async function iuopAesEncrypt(plainText, appKey, encodingAesKey) {
+  const te = new TextEncoder();
+  const textBytes = te.encode(plainText);
+  const appKeyBytes = te.encode(appKey);
+  const pool = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz";
+  const rnd = crypto.getRandomValues(new Uint8Array(16));
+  let random = "";
+  for (let i = 0; i < 16; i++) random += pool[rnd[i] % pool.length];
+  const randomBytes = te.encode(random);
+  const lenBytes = new Uint8Array([
+    (textBytes.length >> 24) & 0xff,
+    (textBytes.length >> 16) & 0xff,
+    (textBytes.length >> 8) & 0xff,
+    textBytes.length & 0xff,
+  ]);
+  const body = new Uint8Array(randomBytes.length + lenBytes.length + textBytes.length + appKeyBytes.length);
+  let off = 0;
+  body.set(randomBytes, off); off += randomBytes.length;
+  body.set(lenBytes, off); off += lenBytes.length;
+  body.set(textBytes, off); off += textBytes.length;
+  body.set(appKeyBytes, off);
+  const padLen = 32 - (body.length % 32);
+  const padded = new Uint8Array(body.length + padLen);
+  padded.set(body);
+  padded.fill(padLen, body.length);
+  const keyBytes = b64ToBytes(encodingAesKey + "=");
+  const iv = keyBytes.slice(0, 16);
+  const cipher = createCipheriv("aes-256-cbc", Buffer.from(keyBytes), Buffer.from(iv));
+  cipher.setAutoPadding(false);
+  const encrypted = Buffer.concat([cipher.update(Buffer.from(padded)), cipher.final()]);
+  return bytesToB64(new Uint8Array(encrypted));
 }
-async function sfPost(env, form) {
-  const endpoint = SF_ENDPOINTS[env.SF_ENV || "sandbox"] || SF_ENDPOINTS.sandbox;
-  const res = await fetch(endpoint, {
+
+// 解密密文回應 → JSON 文字（strip random16 + BE32 長度 + appKey）
+async function iuopAesDecrypt(encryptedB64, encodingAesKey) {
+  const keyBytes = b64ToBytes(encodingAesKey + "=");
+  const iv = keyBytes.slice(0, 16);
+  const decipher = createDecipheriv("aes-256-cbc", Buffer.from(keyBytes), Buffer.from(iv));
+  decipher.setAutoPadding(false);
+  const decrypted = Buffer.concat([decipher.update(Buffer.from(b64ToBytes(encryptedB64))), decipher.final()]);
+  const bytes = [...decrypted];
+  const len = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
+  return new TextDecoder().decode(new Uint8Array(bytes.slice(20, 20 + len)));
+}
+
+function iuopSignature(token, timestamp, nonce, encryptedBody) {
+  const sorted = [token, timestamp, nonce, encryptedBody].sort().join("");
+  return crypto.subtle
+    .digest("SHA-256", new TextEncoder().encode(sorted))
+    .then((buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join(""));
+}
+
+async function iuopDispatch(env, msgType, payload) {
+  const token = await iuopGetToken(env);
+  const timestamp = String(Date.now());
+  const nonce = uuidHex();
+  const encryptedBody = await iuopAesEncrypt(JSON.stringify(payload), env.SF_APP_KEY, env.SF_AES_KEY);
+  const signature = await iuopSignature(token, timestamp, nonce, encryptedBody);
+  const res = await fetch(IUOP_DISPATCH_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(form).toString(),
+    headers: {
+      "Content-Type": "application/json",
+      msgType,
+      appKey: env.SF_APP_KEY,
+      token,
+      timestamp,
+      nonce,
+      signature,
+      lang: "zh-CN",
+    },
+    body: encryptedBody,
   });
   const text = await res.text();
-  try { return JSON.parse(text); }
-  catch (e) { throw new Error("順豐回應非 JSON：" + text.slice(0, 200)); }
+  let j = null;
+  try { j = JSON.parse(text); } catch (e) { j = null; }
+  if (!j || !("apiResultCode" in j)) {
+    try { j = JSON.parse(await iuopAesDecrypt(text, env.SF_AES_KEY)); } catch (e) { j = null; }
+  }
+  if (!j || j.apiResultCode === undefined)
+    throw new Error("順豐回應無法解析：" + text.slice(0, 200));
+  return j;
 }
+
+// 台灣境內 IUOP 運單 payload（欄位依 IUOP 文件，如有不符再調整）
+function buildIuopPayload(order, env) {
+  const contact = order.recipient_name || order.rv_name || "";
+  const phone = order.recipient_phone || order.rv_phone || "";
+  const address = order.recipient_address || order.rv_addr || order.rv_address || "";
+  const fileCount = (order.files || []).reduce((s, f) => s + (Number(f.qty) || 1), 0) || 1;
+  return {
+    customerCode: env.SF_CUSTOMER_CODE,
+    customerOrderNo: order.order_no,
+    parcelQuantity: 1,
+    parcelTotalWeight: 1,
+    parcelWeightUnit: "KG",
+    parcelInfoList: [{
+      name: "影印打印成品",
+      goodsDesc: "影印打印成品",
+      quantity: fileCount,
+      unit: "件",
+      amount: 0.1,
+      currency: "TWD",
+      originCountry: "TW",
+    }],
+    paymentInfo: {
+      payMethod: "1",
+      payMonthCard: env.SF_MONTHLY_CARD || "",
+      taxPayMethod: "1",
+      taxPayMonthCard: "",
+    },
+    pickupType: "0",
+    pickupAppointTime: "",
+    senderInfo: {
+      cargoType: 1,
+      company: env.SF_SENDER_COMPANY || "數倍DTF",
+      contact: env.SF_SENDER_CONTACT || "",
+      phoneNo: env.SF_SENDER_MOBILE || "",
+      phoneAreaCode: "886",
+      country: "TW",
+      regionFirst: env.SF_SENDER_CITY || "",
+      regionSecond: env.SF_SENDER_COUNTY || "",
+      address: env.SF_SENDER_ADDRESS || "",
+      postCode: "",
+    },
+    receiverInfo: {
+      cargoType: 1,
+      company: "",
+      contact,
+      phoneNo: phone,
+      phoneAreaCode: "886",
+      country: "TW",
+      regionFirst: "",
+      regionSecond: "",
+      address,
+      postCode: "",
+    },
+    remark: "",
+    orderOperateType: "1",
+    sfWaybillNo: "",
+    version: "",
+  };
+}
+
 async function sfWaybill(request, env, no) {
   const row = await env.DB.prepare("SELECT order_no, data FROM orders WHERE order_no = ?").bind(no).first();
   if (!row) return [{ ok: false, error: "訂單不存在" }, 404];
@@ -719,8 +780,8 @@ async function sfWaybill(request, env, no) {
   try { order = { order_no: no, ...JSON.parse(row.data) }; } catch (e) { order = { order_no: no }; }
   if (order.logistics_method !== "順豐")
     return [{ ok: false, error: "此訂單非順豐物流，無法建立運單" }, 400];
-  if (!env.SF_PARTNER_ID || !env.SF_CHECK_WORD)
-    return [{ ok: false, error: "尚未設定順豐憑證（SF_PARTNER_ID / SF_CHECK_WORD）" }, 400];
+  if (!env.SF_APP_KEY || !env.SF_APP_SECRET || !env.SF_AES_KEY)
+    return [{ ok: false, error: "尚未設定順豐 IUOP 憑證（SF_APP_KEY / SF_APP_SECRET / SF_AES_KEY）" }, 400];
   if (order.sf && order.sf.waybill_no)
     return [{ ok: true, order_no: no, waybill_no: order.sf.waybill_no, existed: true }, 200];
   try {
@@ -730,40 +791,42 @@ async function sfWaybill(request, env, no) {
         .all()
     ).results;
     order.files = files;
-    const msgData = JSON.stringify(buildSfOrderPayload(order, env));
-    const timestamp = String(Date.now());
-    const form = {
-      partnerID: env.SF_PARTNER_ID,
-      requestID: uuidHex(),
-      serviceCode: "EXP_RECE_CREATE_ORDER",
-      timestamp,
-      msgData,
-      msgDigest: sfMsgDigest(msgData, timestamp, env.SF_CHECK_WORD),
-    };
-    const json = await sfPost(env, form);
-    let inner;
-    try { inner = JSON.parse(json.apiResultData || "{}"); } catch (e) { inner = {}; }
-    if (json.apiResultCode !== "A1000" || inner.success !== true) {
-      console.log("[順豐失敗]", JSON.stringify(json).slice(0, 500));
+    const msgType = env.SF_MSG_TYPE || "IUOP_CREATE_ORDER";
+    const json = await iuopDispatch(env, msgType, buildIuopPayload(order, env));
+    console.log("[順豐IUOP回應]", JSON.stringify(json).slice(0, 1000));
+    if (json.apiResultCode !== 0) {
+      console.log("[順豐IUOP失敗]", JSON.stringify(json).slice(0, 500));
       return [{
         ok: false,
-        error: inner.errorMsg || inner.errorMessage || json.apiErrorMsg || "順豐下單失敗",
-        errorCode: inner.errorCode || json.apiResultCode,
+        error: json.apiErrorMsg || json.apiResultDesc || "順豐下單失敗",
+        errorCode: json.apiResultCode,
       }, 502];
     }
-    const data = inner.msgData || {};
-    const first = (data.waybillNoInfoList || [])[0] || {};
+    let data = json.apiResultData;
+    if (typeof data === "string") {
+      try { data = JSON.parse(data); } catch (e) {
+        try { data = JSON.parse(await iuopAesDecrypt(data, env.SF_AES_KEY)); } catch (e2) { data = {}; }
+      }
+    }
+    data = data || {};
+    const inner = typeof data.data === "object" && data.data !== null ? data.data : {};
+    const waybillNo =
+      data.sfWaybillNo || data.waybillNo || data.mailNo ||
+      inner.sfWaybillNo || inner.waybillNo || inner.mailNo ||
+      (data.waybillNoList && data.waybillNoList[0] && data.waybillNoList[0].waybillNo) ||
+      (data.waybillNoInfoList && data.waybillNoInfoList[0] && data.waybillNoInfoList[0].waybillNo) || "";
+    if (!waybillNo)
+      return [{ ok: false, error: "順豐已受理但未回傳運單號", raw: json }, 502];
     order.sf = {
-      waybill_no: first.waybillNo || "",
-      order_id: data.orderId || no,
+      waybill_no: waybillNo,
+      order_id: order.order_no,
       created_at: new Date().toISOString(),
-      env: env.SF_ENV || "sandbox",
-      img_url: first.imgUrl || "",
+      env: "prod",
     };
     await env.DB.prepare("UPDATE orders SET data = ? WHERE order_no = ?")
       .bind(JSON.stringify(order), no)
       .run();
-    return [{ ok: true, order_no: no, waybill_no: order.sf.waybill_no, errorCode: inner.errorCode || "" }, 200];
+    return [{ ok: true, order_no: no, waybill_no: waybillNo, errorCode: json.apiResultCode || "" }, 200];
   } catch (e) {
     console.log("[順豐例外]", String(e).slice(0, 500));
     return [{ ok: false, error: e.message || "順豐 API 呼叫失敗" }, 502];
