@@ -4,7 +4,7 @@ compatibility_date = "2026-08-01"
 
 [vars]
 MAX_FILE_MB = "95"
-ZIP_MAX_MB = "20"
+ZIP_MAX_MB = "95"
 
 # 前端網域；要暫時允許本機測試時，加進 CORS_ORIGINS
 CORS_ORIGINS = "https://aceeprint.vercel.app"
