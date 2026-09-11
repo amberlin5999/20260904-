@@ -7,9 +7,7 @@ MAX_FILE_MB = "95"
 ZIP_MAX_MB = "95"
 
 # 順豐速運電子運單憑證（向順豐開放平台申請）
-SF_PARTNER_ID = ""
-SF_CHECK_WORD = ""
-SF_MONTHLY_CARD = ""
+# 因屬敏感資訊，改以 wrangler secret 儲存（wrangler secret put SF_PARTNER_ID 等）
 SF_ENV = "sandbox"
 
 # 寄件人（公司）資料——託運單上這欄要正確
