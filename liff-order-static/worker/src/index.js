@@ -398,14 +398,14 @@ async function orderDetail(env, no) {
   return [await hydrate(row, env), 200];
 }
 
-// 更新後台管理進度：狀態（待處理/跟催中/已處理）+ 下次跟催日 + 備註
+// 更新後台管理進度：狀態（待處理/已處理/已報價/已確認/送印中/已出貨/已結單）+ 下次跟催日 + 備註
 async function updateManage(request, env, no) {
   const row = await env.DB.prepare("SELECT order_no FROM orders WHERE order_no = ?").bind(no).first();
   if (!row) return [{ ok: false, error: "訂單不存在" }, 404];
   let body;
   try { body = await request.json(); } catch (e) { body = null; }
   if (!body || typeof body !== "object") return [{ ok: false, error: "JSON 解析失敗" }, 400];
-  const status = ["pending", "followup", "done", "cleaned"].includes(body.manage_status) ? body.manage_status : "";
+  const status = ["pending", "done", "quoted", "confirmed", "printing", "shipped", "closed"].includes(body.manage_status) ? body.manage_status : "";
   const followupAt = String(body.followup_at || "").trim() || null;
   const note = String(body.note ?? "").trim();
   if (!status) return [{ ok: false, error: "管理狀態無效" }, 400];

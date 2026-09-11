@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS orders (
   status        TEXT NOT NULL DEFAULT 'received',
   data          TEXT NOT NULL,
   created_at    TEXT NOT NULL,
-  manage_status TEXT NOT NULL DEFAULT 'pending',  -- 後台管理狀態：pending(待處理) / followup(跟催中) / done(已處理) / cleaned(已清理)
+  manage_status TEXT NOT NULL DEFAULT 'pending',  -- 後台管理狀態：pending(待處理) / done(已處理) / quoted(已報價) / confirmed(已確認) / printing(送印中) / shipped(已出貨) / closed(已結單)
   followup_at   TEXT,                              -- 下次跟催日期 (YYYY-MM-DD)
   note          TEXT                               -- 內部備註（跟催事項等）
 );

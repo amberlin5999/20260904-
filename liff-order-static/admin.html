@@ -22,6 +22,7 @@
   .st.green { background: #e2f3e6; color: #287a3a; }
   .st.gray { background: #eceff3; color: #666; }
   .st.amber { background: #fdf3d7; color: #8a6d00; }
+  .st.blue { background: #e3ecf7; color: #1d5f8f; }
   .st.mgr { margin-left: 4px; }
   .manage-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #dde3ea; align-items: center; }
   .manage-row select, .manage-row input { padding: 6px 8px; border: 1px solid #c9d2dc; border-radius: 7px; font-size: 13px; }
@@ -92,9 +93,12 @@
     <select id="fManage" style="padding:7px;border:1px solid #c9d2dc;border-radius:7px">
       <option value="">管理：全部</option>
       <option value="pending">待處理</option>
-      <option value="followup">跟催中</option>
       <option value="done">已處理</option>
-      <option value="cleaned">已清理</option>
+      <option value="quoted">已報價</option>
+      <option value="confirmed">已確認</option>
+      <option value="printing">送印中</option>
+      <option value="shipped">已出貨</option>
+      <option value="closed">已結單</option>
     </select>
     <button onclick="load()" style="padding:7px 14px;border:0;border-radius:7px;background:#0f2537;color:#fff;cursor:pointer">篩選</button>
     <button onclick="clearFilter()" style="padding:7px 14px;border:1px solid #c9d2dc;border-radius:7px;background:#fff;cursor:pointer">清除</button>
@@ -386,8 +390,8 @@
   function fmtSize(n) { n = Number(n) || 0; const u = ["B","KB","MB","GB"]; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return n.toFixed(n >= 10 || i === 0 ? 0 : 1) + " " + u[i]; }
   function stateCls(s) { return s === "received" ? "red" : (s === "files_uploaded" ? "green" : "gray"); }
   function stateLbl(s) { return s === "received" ? "已收單（尚未傳檔）" : (s === "files_uploaded" ? "檔案已上傳" : s); }
-  function manageCls(s) { return s === "done" ? "green" : (s === "followup" ? "amber" : "gray"); }
-  function manageLbl(s) { return s === "pending" ? "待處理" : (s === "followup" ? "跟催中" : (s === "done" ? "已處理" : (s === "cleaned" ? "已清理" : s))); }
+  function manageCls(s) { return s === "done" ? "gray" : (s === "quoted" || s === "printing" ? "amber" : (s === "confirmed" ? "blue" : (s === "shipped" || s === "closed" ? "green" : "gray"))); }
+  function manageLbl(s) { return s === "pending" ? "待處理" : (s === "done" ? "已處理" : (s === "quoted" ? "已報價" : (s === "confirmed" ? "已確認" : (s === "printing" ? "送印中" : (s === "shipped" ? "已出貨" : (s === "closed" ? "已結單" : s)))))); }
   function followupOverdue(d) { try { return d && new Date(d).getTime() < new Date(new Date().toDateString()).getTime(); } catch (e) { return false; } }
   function fmtDate(iso, hasTime) { try { const d = new Date(iso); if (isNaN(d)) return iso; return hasTime ? d.toLocaleString("zh-TW", { hour12: false }) : d.toLocaleDateString("zh-TW"); } catch (e) { return iso; } }
   function kv(label, val) { return val === undefined || val === null || String(val).trim() === "" ? "" : `<div><b>${esc(label)}</b> ${esc(val)}</div>`; }
@@ -852,8 +856,8 @@ function exportConfirmXlsx(o) {
     orders = ordersData;
     const allCount = orders.length;
     const recvCount = orders.filter(o => o.status === "received").length;
-    const followupCount = orders.filter(o => o.manage_status !== "done" && (o.status === "received" || String(o.manage_status).includes("follow"))).length;
-    $("filterStats").textContent = `共 ${allCount} 筆｜尚未傳檔 ${recvCount} 筆｜待處理/跟催 ${followupCount} 筆`;
+    const openCount = orders.filter(o => o.manage_status !== "closed").length;
+    $("filterStats").textContent = `共 ${allCount} 筆｜尚未傳檔 ${recvCount} 筆｜未結單 ${openCount} 筆`;
     if (!orders || !orders.length) { box.innerHTML = "<div class='empty'>目前沒有訂單</div>"; return; }
     box.innerHTML = orders.map((o, idx) => {
       const files = o.files || [];
@@ -912,9 +916,12 @@ function exportConfirmXlsx(o) {
         <div class="manage-row" data-no="${esc(o.order_no)}">
           <select class="m-status" onchange="saveManage(orders[${idx}], this)">
             <option value="pending" ${o.manage_status === "pending" ? "selected" : ""}>待處理</option>
-            <option value="followup" ${o.manage_status === "followup" ? "selected" : ""}>跟催中</option>
             <option value="done" ${o.manage_status === "done" ? "selected" : ""}>已處理</option>
-            <option value="cleaned" ${o.manage_status === "cleaned" ? "selected" : ""}>已清理</option>
+            <option value="quoted" ${o.manage_status === "quoted" ? "selected" : ""}>已報價</option>
+            <option value="confirmed" ${o.manage_status === "confirmed" ? "selected" : ""}>已確認</option>
+            <option value="printing" ${o.manage_status === "printing" ? "selected" : ""}>送印中</option>
+            <option value="shipped" ${o.manage_status === "shipped" ? "selected" : ""}>已出貨</option>
+            <option value="closed" ${o.manage_status === "closed" ? "selected" : ""}>已結單</option>
           </select>
           <input type="date" class="m-followup" data-no="${esc(o.order_no)}" value="${esc(o.followup_at || "")}" title="下次跟催日期">
           <input type="text" class="m-note" data-no="${esc(o.order_no)}" value="${esc(o.note || "")}" placeholder="內部備註／跟催事項" style="flex:1;min-width:140px">
