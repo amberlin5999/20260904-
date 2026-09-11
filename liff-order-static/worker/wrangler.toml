@@ -6,6 +6,21 @@ compatibility_date = "2026-08-01"
 MAX_FILE_MB = "95"
 ZIP_MAX_MB = "95"
 
+# 順豐速運電子運單憑證（向順豐開放平台申請）
+SF_PARTNER_ID = ""
+SF_CHECK_WORD = ""
+SF_MONTHLY_CARD = ""
+SF_ENV = "sandbox"
+
+# 寄件人（公司）資料——託運單上這欄要正確
+SF_SENDER_COMPANY = "數倍DTF"
+SF_SENDER_CONTACT = ""
+SF_SENDER_MOBILE = ""
+SF_SENDER_PROVINCE = ""
+SF_SENDER_CITY = ""
+SF_SENDER_COUNTY = ""
+SF_SENDER_ADDRESS = ""
+
 # 前端網域；要暫時允許本機測試時，加進 CORS_ORIGINS
 CORS_ORIGINS = "https://aceeprint.vercel.app"
 

@@ -770,6 +770,72 @@ function exportConfirmXlsx(o) {
     openDoc("印製確認單", body, o.order_no);
   }
 
+  /* ---- 順豐運單：後台開單 → 列印託運單 ---- */
+  async function openSfWaybill(o) {
+    const api = $("api2").value.trim().replace(/\/+$/, "");
+    if (!confirm(`為訂單 #${o.order_no} 建立順豐運單？\n（將通知順豐收派員上門收件）`)) return;
+    const btn = event && event.target;
+    if (btn) { btn.disabled = true; btn.textContent = "開單中…"; }
+    try {
+      const r = await fetch(api + "/api/orders/" + encodeURIComponent(o.order_no) + "/sf-waybill", {
+        method: "POST",
+        headers: getAuthHeaders(),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "開單失敗");
+      alert(`運單已建立！\n運單號：${data.waybill_no}`);
+      load();
+    } catch (e) { alert("順豐開單失敗：" + e.message); }
+    if (btn) { btn.disabled = false; btn.textContent = "SF 開運單"; }
+  }
+  function printSf(o) {
+    const sf = o.sf || {};
+    const logo = o.logistics_method;
+    let rcv = "";
+    if (String(logo).includes("門市") || String(logo).includes("超商")) {
+      rcv = pairRows([
+        ["收件人", o.recipient_name || o.rv_name || ""],
+        ["收件電話", o.recipient_phone || o.rv_phone || ""],
+        ["門市", o.store_name || o.st_name || ""],
+        ["門市代碼", o.st_code || ""],
+        ["門市地址", o.st_addr || ""],
+      ]);
+    } else {
+      rcv = pairRows([
+        ["收件人", o.recipient_name || o.rv_name || ""],
+        ["收件電話", o.recipient_phone || o.rv_phone || ""],
+        ["收件地址", o.recipient_address || o.rv_addr || o.rv_address || ""],
+      ]);
+    }
+    const body = `
+      <div class="doc-title">順豐速運 · 託運單</div>
+      <div class="doc-sub">SF EXPRESS WAYBILL</div>
+      <table class="grid">
+        <colgroup><col style="width:18%"><col style="width:32%"><col style="width:18%"><col style="width:32%"></colgroup>
+        <tbody>
+          <tr><td class="lbl">訂單編號</td><td class="val">${esc(o.order_no)}</td><td class="lbl">託運日期</td><td class="val">${esc(fmtDate(new Date().toISOString()))}</td></tr>
+          <tr><td class="lbl">運單號</td><td class="val" colspan="3" style="font-weight:700;font-size:20px;letter-spacing:2px">${esc(sf.waybill_no || "")}</td></tr>
+        </tbody>
+      </table>
+      <div class="sec-h">寄件人（我方）</div>
+      ${pairRows([
+        ["寄件人", o.sf_company || "數倍DTF"],
+        ["聯絡人", o.sf_contact || ""],
+        ["電話", o.sf_mobile || ""],
+        ["寄件地址", o.sf_address || ""],
+      ])}
+      <div class="sec-h">收件人（客戶）</div>
+      ${rcv}
+      <div class="sec-h">貨物資訊</div>
+      ${pairRows([
+        ["品名", o.sf_cargo_name || "影印打印成品"],
+        ["件數", o.sf_cargo_count || ((o.files || []).reduce((s, f) => s + (Number(f.qty) || 1), 0) || 1)],
+        ["寄件方付款", "是（寄方付）"],
+      ])}
+      <div class="sig"><div>寄件人簽名</div><div>業務核對 / 日期</div></div>`;
+    openDoc("順豐託運單", body, sf.waybill_no || o.order_no);
+  }
+
   function confirmSection(o, idx) {
     const conf = confFor(o.order_no);
     const isDtfr = getFilePrefix(o.product_type) === "DTFR";
@@ -912,6 +978,11 @@ function exportConfirmXlsx(o) {
           <button class="pb-work" onclick="printWork(orders[${idx}])">W 派工單</button>
           <button class="pb-qc" onclick="printQc(orders[${idx}])">QC 品管確認單</button>
           <button class="pb-qc" style="background:#1d5f8f" onclick="printQuote(orders[${idx}])">Q 印製確認單</button>
+          ${String(o.logistics_method || "").includes("順豐")
+            ? (o.sf && o.sf.waybill_no
+                ? `<button class="pb-qc" style="background:#d43b2d" onclick="printSf(orders[${idx}])">SF 列印託運單</button>`
+                : `<button class="pb-qc" style="background:#d43b2d" onclick="openSfWaybill(orders[${idx}])">SF 開運單</button>`)
+            : ""}
         </div>
         <div class="manage-row" data-no="${esc(o.order_no)}">
           <select class="m-status" onchange="saveManage(orders[${idx}], this)">

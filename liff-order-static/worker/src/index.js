@@ -571,16 +571,203 @@ async function downloadZip(env, no) {
   ];
 }
 
-/* ---------- 順豐速運（憑證 SF_PARTNER_ID / SF_CHECK_WORD 就緒後再完成簽名） ---------- */
+/* ---------- 順豐速運（EXP_RECE_CREATE_ORDER 電子運單） ----------
+ * 憑證（wrangler.toml [vars]）：
+ *   SF_PARTNER_ID   顧客編碼（clientCode）
+ *   SF_CHECK_WORD   校驗碼（checkWord，簽名用）
+ *   SF_MONTHLY_CARD 月結卡號（寄方付必要；沙箱留空）
+ *   SF_ENV          sandbox（預設）| prod
+ *   SF_SENDER_*     寄件人（公司）地址／聯絡資料
+ * 簽名：msgDigest = base64( MD5( urlEncodeJava( msgData + timestamp + checkWord ) ) )
+ */
+const SF_ENDPOINTS = {
+  sandbox: "https://sfapi-sbox.sf-express.com/std/service",
+  prod: "https://sfapi.sf-express.com/std/service",
+};
+
+// MD5（RFC 1321，blueimp 結構，無 Node 相依；Workers 無 MD5 digest）
+function md5Hex(inputString) {
+  var add32 = function (a, b) { return (a + b) & 0xffffffff; };
+  var cmn = function (q, a, b, x, s, t) { a = add32(add32(a, q), add32(x, t)); return add32((a << s) | (a >>> (32 - s)), b); };
+  var ff = function (a, b, c, d, x, s, t) { return cmn((b & c) | (~b & d), a, b, x, s, t); };
+  var gg = function (a, b, c, d, x, s, t) { return cmn((b & d) | (c & ~d), a, b, x, s, t); };
+  var hh = function (a, b, c, d, x, s, t) { return cmn(b ^ c ^ d, a, b, x, s, t); };
+  var ii = function (a, b, c, d, x, s, t) { return cmn(c ^ (b | ~d), a, b, x, s, t); };
+  var md5cycle = function (x, k) {
+    var a = x[0], b = x[1], c = x[2], d = x[3];
+    a = ff(a, b, c, d, k[0], 7, -680876936); d = ff(d, a, b, c, k[1], 12, -389564586); c = ff(c, d, a, b, k[2], 17, 606105819); b = ff(b, c, d, a, k[3], 22, -1044525330);
+    a = ff(a, b, c, d, k[4], 7, -176418897); d = ff(d, a, b, c, k[5], 12, 1200080426); c = ff(c, d, a, b, k[6], 17, -1473231341); b = ff(b, c, d, a, k[7], 22, -45705983);
+    a = ff(a, b, c, d, k[8], 7, 1770035416); d = ff(d, a, b, c, k[9], 12, -1958414417); c = ff(c, d, a, b, k[10], 17, -42063); b = ff(b, c, d, a, k[11], 22, -1990404162);
+    a = ff(a, b, c, d, k[12], 7, 1804603682); d = ff(d, a, b, c, k[13], 12, -40341101); c = ff(c, d, a, b, k[14], 17, -1502002290); b = ff(b, c, d, a, k[15], 22, 1236535329);
+    a = gg(a, b, c, d, k[1], 5, -165796510); d = gg(d, a, b, c, k[6], 9, -1069501632); c = gg(c, d, a, b, k[11], 14, 643717713); b = gg(b, c, d, a, k[0], 20, -373897302);
+    a = gg(a, b, c, d, k[5], 5, -701558691); d = gg(d, a, b, c, k[10], 9, 38016083); c = gg(c, d, a, b, k[15], 14, -660478335); b = gg(b, c, d, a, k[4], 20, -405537848);
+    a = gg(a, b, c, d, k[9], 5, 568446438); d = gg(d, a, b, c, k[14], 9, -1019803690); c = gg(c, d, a, b, k[3], 14, -187363961); b = gg(b, c, d, a, k[8], 20, 1163531501);
+    a = gg(a, b, c, d, k[13], 5, -1444681467); d = gg(d, a, b, c, k[2], 9, -51403784); c = gg(c, d, a, b, k[7], 14, 1735328473); b = gg(b, c, d, a, k[12], 20, -1926607734);
+    a = hh(a, b, c, d, k[5], 4, -378558); d = hh(d, a, b, c, k[8], 11, -2022574463); c = hh(c, d, a, b, k[11], 16, 1839030562); b = hh(b, c, d, a, k[14], 23, -35309556);
+    a = hh(a, b, c, d, k[1], 4, -1530992060); d = hh(d, a, b, c, k[4], 11, 1272893353); c = hh(c, d, a, b, k[7], 16, -155497632); b = hh(b, c, d, a, k[10], 23, -1094730640);
+    a = hh(a, b, c, d, k[13], 4, 681279174); d = hh(d, a, b, c, k[0], 11, -358537222); c = hh(c, d, a, b, k[3], 16, -722521979); b = hh(b, c, d, a, k[6], 23, 76029189);
+    a = hh(a, b, c, d, k[9], 4, -640364487); d = hh(d, a, b, c, k[12], 11, -421815835); c = hh(c, d, a, b, k[15], 16, 530742520); b = hh(b, c, d, a, k[2], 23, -995338651);
+    a = ii(a, b, c, d, k[0], 6, -198630844); d = ii(d, a, b, c, k[7], 10, 1126891415); c = ii(c, d, a, b, k[14], 15, -1416354905); b = ii(b, c, d, a, k[5], 21, -57434055);
+    a = ii(a, b, c, d, k[12], 6, 1700485571); d = ii(d, a, b, c, k[3], 10, -1894986606); c = ii(c, d, a, b, k[10], 15, -1051523); b = ii(b, c, d, a, k[1], 21, -2054922799);
+    a = ii(a, b, c, d, k[8], 6, 1873313359); d = ii(d, a, b, c, k[15], 10, -30611744); c = ii(c, d, a, b, k[6], 15, -1560198380); b = ii(b, c, d, a, k[13], 21, 1309151649);
+    a = ii(a, b, c, d, k[4], 6, -145523070); d = ii(d, a, b, c, k[11], 10, -1120210379); c = ii(c, d, a, b, k[2], 15, 718787259); b = ii(b, c, d, a, k[9], 21, -343485551);
+    x[0] = add32(a, x[0]); x[1] = add32(b, x[1]); x[2] = add32(c, x[2]); x[3] = add32(d, x[3]);
+  };
+  var md51 = function (s) {
+    var n = s.length, state = [1732584193, -271733879, -1732584194, 271733878], i;
+    for (i = 64; i <= s.length; i += 64) { md5cycle(state, md5blk(s.substring(i - 64, i))); }
+    s = s.substring(i - 64);
+    var tail = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    for (i = 0; i < s.length; i++) tail[i >> 2] |= s.charCodeAt(i) << ((i % 4) << 3);
+    tail[i >> 2] |= 0x80 << ((i % 4) << 3);
+    if (i > 55) { md5cycle(state, tail); for (i = 0; i < 16; i++) tail[i] = 0; }
+    tail[14] = n * 8;
+    md5cycle(state, tail);
+    return state;
+  };
+  var md5blk = function (s) {
+    var md5blks = [], i;
+    for (i = 0; i < 64; i += 4) md5blks[i >> 2] = s.charCodeAt(i) + (s.charCodeAt(i + 1) << 8) + (s.charCodeAt(i + 2) << 16) + (s.charCodeAt(i + 3) << 24);
+    return md5blks;
+  };
+  var rhex = function (n) { var s = "", j; for (j = 0; j < 4; j++) s += hexChr[(n >> (j * 8 + 4)) & 0x0f] + hexChr[(n >> (j * 8)) & 0x0f]; return s; };
+  var hexChr = "0123456789abcdef".split("");
+  var raw = encodeURIComponent(inputString).replace(/%([0-9A-F]{2})/g, function (_, h) { return String.fromCharCode(parseInt(h, 16)); });
+  return md51(raw).map(rhex).join("");
+}
+function hexToB64(hex) {
+  let bin = "";
+  for (let i = 0; i < hex.length; i += 2) bin += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+  return btoa(bin);
+}
+function urlEncodeJava(s) {
+  return encodeURIComponent(s)
+    .replace(/%20/g, "+")
+    .replace(/!/g, "%21")
+    .replace(/'/g, "%27")
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29")
+    .replace(/~/g, "%7E");
+}
+function sfMsgDigest(msgData, timestamp, checkWord) {
+  return hexToB64(md5Hex(urlEncodeJava(msgData + timestamp + checkWord)));
+}
+function parseTwAddress(addr) {
+  const s = String(addr || "").trim();
+  const m = s.match(/^(臺?[^縣市]{1,3}[縣市])([^鄉鎮市區]{1,4}[鄉鎮市區])?(.*)$/);
+  if (!m) return { province: "", city: "", county: "", line: s };
+  return { province: m[1] || "", city: m[2] || "", county: "", line: (m[3] || "").trim() };
+}
+function uuidHex() {
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  let s = "";
+  for (let i = 0; i < 16; i++) s += b[i].toString(16).padStart(2, "0");
+  return s;
+}
+function buildSfOrderPayload(order, env) {
+  const r = parseTwAddress(order.recipient_address || order.rv_addr || order.rv_address || "");
+  const fileCount = (order.files || [])
+    .reduce((sum, f) => sum + (Number(f.qty) || 1), 0) || 1;
+  return {
+    language: "zh-CN",
+    orderId: order.order_no,
+    cargoDetails: [
+      { name: "影印打印成品", count: fileCount, unit: "件", weight: 1 },
+    ],
+    contactInfoList: [
+      {
+        contactType: 1, country: "TW",
+        company: env.SF_SENDER_COMPANY || "數倍DTF",
+        contact: env.SF_SENDER_CONTACT || "",
+        mobile: env.SF_SENDER_MOBILE || "",
+        province: env.SF_SENDER_PROVINCE || "",
+        city: env.SF_SENDER_CITY || "",
+        county: env.SF_SENDER_COUNTY || "",
+        address: env.SF_SENDER_ADDRESS || "",
+      },
+      {
+        contactType: 2, country: "TW",
+        contact: order.recipient_name || order.rv_name || "",
+        mobile: order.recipient_phone || order.rv_phone || "",
+        province: r.province, city: r.city, county: r.county,
+        address: order.recipient_address || order.rv_addr || order.rv_address || "",
+      },
+    ],
+    expressTypeId: Number(env.SF_EXPRESS_TYPE_ID || 1),
+    payMethod: 1,
+    monthlyCard: env.SF_MONTHLY_CARD || "",
+    parcelQty: 1,
+    totalWeight: 1,
+    isDocall: 1,
+  };
+}
+async function sfPost(env, form) {
+  const endpoint = SF_ENDPOINTS[env.SF_ENV || "sandbox"] || SF_ENDPOINTS.sandbox;
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(form).toString(),
+  });
+  const text = await res.text();
+  try { return JSON.parse(text); }
+  catch (e) { throw new Error("順豐回應非 JSON：" + text.slice(0, 200)); }
+}
 async function sfWaybill(request, env, no) {
-  const row = await env.DB.prepare("SELECT data FROM orders WHERE order_no = ?").bind(no).first();
+  const row = await env.DB.prepare("SELECT order_no, data FROM orders WHERE order_no = ?").bind(no).first();
   if (!row) return [{ ok: false, error: "訂單不存在" }, 404];
-  const order = { order_no: no, ...JSON.parse(row.data) };
+  let order;
+  try { order = { order_no: no, ...JSON.parse(row.data) }; } catch (e) { order = { order_no: no }; }
   if (order.logistics_method !== "順豐")
     return [{ ok: false, error: "此訂單非順豐物流，無法建立運單" }, 400];
   if (!env.SF_PARTNER_ID || !env.SF_CHECK_WORD)
     return [{ ok: false, error: "尚未設定順豐憑證（SF_PARTNER_ID / SF_CHECK_WORD）" }, 400];
-  return [{ ok: false, error: "順豐簽名（MD5）移植尚未完成，提供憑證後可補上" }, 501];
+  if (order.sf && order.sf.waybill_no)
+    return [{ ok: true, order_no: no, waybill_no: order.sf.waybill_no, existed: true }, 200];
+  try {
+    const files = (
+      await env.DB.prepare("SELECT name, qty FROM order_files WHERE order_no = ? ORDER BY id ASC")
+        .bind(no)
+        .all()
+    ).results;
+    order.files = files;
+    const msgData = JSON.stringify(buildSfOrderPayload(order, env));
+    const timestamp = String(Date.now());
+    const form = {
+      partnerID: env.SF_PARTNER_ID,
+      requestID: uuidHex(),
+      serviceCode: "EXP_RECE_CREATE_ORDER",
+      timestamp,
+      msgData,
+      msgDigest: sfMsgDigest(msgData, timestamp, env.SF_CHECK_WORD),
+    };
+    const json = await sfPost(env, form);
+    let inner;
+    try { inner = JSON.parse(json.apiResultData || "{}"); } catch (e) { inner = {}; }
+    if (json.apiResultCode !== "A1000" || inner.success !== true) {
+      console.log("[順豐失敗]", JSON.stringify(json).slice(0, 500));
+      return [{
+        ok: false,
+        error: inner.errorMsg || inner.errorMessage || json.apiErrorMsg || "順豐下單失敗",
+        errorCode: inner.errorCode || json.apiResultCode,
+      }, 502];
+    }
+    const data = inner.msgData || {};
+    const first = (data.waybillNoInfoList || [])[0] || {};
+    order.sf = {
+      waybill_no: first.waybillNo || "",
+      order_id: data.orderId || no,
+      created_at: new Date().toISOString(),
+      env: env.SF_ENV || "sandbox",
+      img_url: first.imgUrl || "",
+    };
+    await env.DB.prepare("UPDATE orders SET data = ? WHERE order_no = ?")
+      .bind(JSON.stringify(order), no)
+      .run();
+    return [{ ok: true, order_no: no, waybill_no: order.sf.waybill_no, errorCode: inner.errorCode || "" }, 200];
+  } catch (e) {
+    console.log("[順豐例外]", String(e).slice(0, 500));
+    return [{ ok: false, error: e.message || "順豐 API 呼叫失敗" }, 502];
+  }
 }
 
 /* ---------- 主路由器 ---------- */
