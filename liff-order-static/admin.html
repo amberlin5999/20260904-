@@ -801,7 +801,7 @@ function exportConfirmXlsx(o) {
     ].filter(line => !/：$/.test(line)).join("\n"));
   }
   function openSfWeb(o) {
-    window.open("https://htm.sf-express.com/we/ow/?order_no=" + encodeURIComponent(o.order_no || "") + "#/tw/tc/ship/home", "_blank", "noopener");
+    window.open("https://htm.sf-express.com/we/ow/?order_no=" + encodeURIComponent(o.order_no || "") + "#/tw/tc/ship/home", "_blank", "noopener,noreferrer");
   }
 
   /* ---- 順豐運單：後台開單 → 列印託運單 ---- */
