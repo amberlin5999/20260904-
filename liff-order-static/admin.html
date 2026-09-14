@@ -791,13 +791,10 @@ function exportConfirmXlsx(o) {
     const name = o.recipient_name || o.rv_name || "";
     const phone = o.recipient_phone || o.rv_phone || "";
     const addr = o.recipient_address || o.rv_addr || o.rv_address || "";
-    const qty = (o.files || []).reduce((s, f) => s + (Number(f.qty) || 1), 0) || 1;
     copyText([
-      `訂單編號：${o.order_no || ""}`,
       `收件人：${name}`,
       `收件電話：${phone}`,
       `收件地址：${addr}`,
-      `件數：${qty} 件（影印打印成品）`,
     ].filter(line => !/：$/.test(line)).join("\n"));
   }
   function openSfWeb(o) {
@@ -1023,11 +1020,7 @@ function exportConfirmXlsx(o) {
           <button class="pb-qc" onclick="printQc(orders[${idx}])">QC 品管確認單</button>
           <button class="pb-qc" style="background:#1d5f8f" onclick="printQuote(orders[${idx}])">Q 印製確認單</button>
           ${String(o.logistics_method || "").includes("順豐")
-            ? `<button class="pb-qc" style="background:#2a7d3f" onclick="copyShip(orders[${idx}])">複製寄件資料</button>
-               <button class="pb-qc" style="background:#2a7d3f" onclick="openSfWeb(orders[${idx}])">開網上寄件</button>
-               ${o.sf && o.sf.waybill_no
-                 ? `<button class="pb-qc" style="background:#d43b2d" onclick="printSf(orders[${idx}])">SF 列印託運單</button>`
-                 : `<button class="pb-qc" style="background:#d43b2d" onclick="openSfWaybill(orders[${idx}])">SF 開運單</button>`}`
+            ? `<button class="pb-qc" style="background:#2a7d3f" onclick="copyShip(orders[${idx}])">複製寄件資料</button>`
             : ""}
         </div>
         <div class="manage-row" data-no="${esc(o.order_no)}">
