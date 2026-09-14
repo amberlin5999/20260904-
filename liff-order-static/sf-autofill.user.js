@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         順豐網上寄件 自動填寫收件資料
 // @namespace    aceeprint-dtf
-// @version      0.1
-// @description  admin「複製寄件資料」之後，在順豐網上寄件頁面點浮動按鈕，自動填入姓名/手機/詳細地址
+// @version      0.2
+// @description  admin「複製寄件資料」之後，在順豐網上寄件頁面點浮動按鈕（或 Tampermonkey 選單），自動填入姓名/手機/詳細地址
 // @match        https://htm.sf-express.com/we/ow/*
-// @grant        none
+// @grant        GM_registerMenuCommand
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -27,33 +27,27 @@
     );
   }
 
-  function readClipboard(rawFallback) {
-    return navigator.clipboard.readText().catch(() => rawFallback || "");
-  }
-
-  function makeButton() {
-    const btn = document.createElement('button');
-    btn.textContent = '填入收件資料';
-    btn.style.cssText = 'position:fixed;right:18px;bottom:90px;z-index:2147483647;background:#2a7d3f;color:#fff;border:0;border-radius:8px;padding:12px 16px;font-size:15px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.35)';
-    document.body.appendChild(btn);
-    return btn;
-  }
-
-  const orderNo = new URLSearchParams(location.search).get('order_no') || '';
-
-  function fill() {
+  function readClipboardViaPaste() {
     const ta = document.createElement('textarea');
     ta.style.cssText = 'position:fixed;left:-9999px;top:0';
     document.body.appendChild(ta);
     ta.focus();
-    document.execCommand('paste');
+    try { document.execCommand('paste'); } catch (e) {}
     const clip = ta.value;
     document.body.removeChild(ta);
     return clip;
   }
 
+  function readClipboardPromise() {
+    const w = unsafeWindow || window;
+    if (w.navigator && w.navigator.clipboard && w.navigator.clipboard.readText) {
+      return w.navigator.clipboard.readText().catch(() => readClipboardViaPaste());
+    }
+    return Promise.resolve(readClipboardViaPaste());
+  }
+
   function fillFrom(text) {
-    const m = text.match(CLIP_RE);
+    const m = String(text || '').match(CLIP_RE);
     if (!m) return { done: false };
     const name = m[1].trim();
     const phone = m[2].trim();
@@ -65,28 +59,52 @@
     if (n1 && name) { setNativeValue(n1, name); filled++; }
     if (p1 && phone) { setNativeValue(p1, phone); filled++; }
     if (a1 && addr) { setNativeValue(a1, addr); filled++; }
-    return { done: filled > 0, filled };
+    return { done: filled > 0, filled, name, phone, addr };
   }
 
-  const btn = makeButton();
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    let raw = '';
-    try { raw = await readClipboard(); }
-    catch (e) { /* 著手動貼 */ }
-    if (!raw) raw = fill();
-    const r = fillFrom(raw);
-    if (!r.done) {
-      const pasted = window.prompt('沒讀到收件資料。請手動貼上 admin 複製的內容：', raw || '');
-      if (pasted) fillFrom(pasted);
-    }
-    btn.disabled = false;
-  });
+  function runFill() {
+    return readClipboardPromise().then((raw) => {
+      let r = fillFrom(raw);
+      if (!r.done) {
+        const pasted = window.prompt('沒讀到收件資料。請手動貼上 admin「複製寄件資料」的內容：', raw || '');
+        if (pasted) r = fillFrom(pasted);
+      }
+      if (r.done) alert('已填入：' + r.name + ' ／ ' + r.phone + '\n請確認「省市區」並送出。');
+      else alert('沒找到可填的欄位（姓名/手機/詳細地址）。');
+      return r;
+    });
+  }
 
+  let btn;
+  function ensureButton() {
+    if (btn && document.body && btn.isConnected) return;
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.textContent = '填入收件資料';
+      btn.style.cssText = 'position:fixed;right:18px;bottom:90px;z-index:2147483647;background:#2a7d3f;color:#fff;border:0;border-radius:8px;padding:12px 16px;font-size:15px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.35)';
+      btn.addEventListener('click', () => { runFill(); });
+    }
+    if (document.body) document.body.appendChild(btn);
+  }
+
+  GM_registerMenuCommand('填入收件資料（順豐）', () => { runFill(); });
+
+  ensureButton();
+  new MutationObserver(ensureButton).observe(document.documentElement, { childList: true, subtree: true });
+
+  const orderNo = new URLSearchParams(location.search).get('order_no') || '';
   if (orderNo) {
-    const tag = document.createElement('div');
-    tag.textContent = '訂單 ' + orderNo;
-    tag.style.cssText = 'position:fixed;right:18px;bottom:140px;z-index:2147483647;background:rgba(15,37,55,.85);color:#fff;border-radius:6px;padding:6px 10px;font-size:13px';
-    document.body.appendChild(tag);
+    let tag;
+    function ensureTag() {
+      if (tag && document.body && tag.isConnected) return;
+      if (!tag) {
+        tag = document.createElement('div');
+        tag.textContent = '訂單 ' + orderNo;
+        tag.style.cssText = 'position:fixed;right:18px;bottom:140px;z-index:2147483647;background:rgba(15,37,55,.85);color:#fff;border-radius:6px;padding:6px 10px;font-size:13px';
+      }
+      if (document.body) document.body.appendChild(tag);
+    }
+    ensureTag();
+    new MutationObserver(ensureTag).observe(document.documentElement, { childList: true, subtree: true });
   }
 })();
