@@ -1,9 +1,11 @@
 // ==UserScript==
 // @name         順豐網上寄件 自動填寫收件資料
 // @namespace    aceeprint-dtf
-// @version      0.2
+// @version      0.3
 // @description  admin「複製寄件資料」之後，在順豐網上寄件頁面點浮動按鈕（或 Tampermonkey 選單），自動填入姓名/手機/詳細地址
-// @match        https://htm.sf-express.com/we/ow/*
+// @match        https://htm.sf-express.com/*
+// @match        https://*.sf-express.com/we/ow/*
+// @match        http://htm.sf-express.com/*
 // @grant        GM_registerMenuCommand
 // @run-at       document-idle
 // ==/UserScript==
@@ -75,9 +77,14 @@
     });
   }
 
+  function isShipPage() {
+    return /we\/ow|#\/tw\/tc\/ship|ship\//.test(location.href);
+  }
+
   let btn;
   function ensureButton() {
     if (btn && document.body && btn.isConnected) return;
+    if (!isShipPage()) return;
     if (!btn) {
       btn = document.createElement('button');
       btn.textContent = '填入收件資料';
@@ -97,6 +104,7 @@
     let tag;
     function ensureTag() {
       if (tag && document.body && tag.isConnected) return;
+      if (!isShipPage()) return;
       if (!tag) {
         tag = document.createElement('div');
         tag.textContent = '訂單 ' + orderNo;
