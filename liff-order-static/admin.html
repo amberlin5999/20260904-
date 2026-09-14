@@ -800,8 +800,8 @@ function exportConfirmXlsx(o) {
       `件數：${qty} 件（影印打印成品）`,
     ].filter(line => !/：$/.test(line)).join("\n"));
   }
-  function openSfWeb() {
-    window.open("https://htm.sf-express.com/tw/tc/dynamic_function/order/self_pickup_self_dropoff/", "_blank", "noopener");
+  function openSfWeb(o) {
+    window.open("https://htm.sf-express.com/tw/tc/dynamic_function/order/self_pickup_self_dropoff/?order_no=" + encodeURIComponent(o.order_no || ""), "_blank", "noopener");
   }
 
   /* ---- 順豐運單：後台開單 → 列印託運單 ---- */
@@ -1018,7 +1018,7 @@ function exportConfirmXlsx(o) {
           <button class="pb-qc" style="background:#1d5f8f" onclick="printQuote(orders[${idx}])">Q 印製確認單</button>
           ${String(o.logistics_method || "").includes("順豐")
             ? `<button class="pb-qc" style="background:#2a7d3f" onclick="copyShip(orders[${idx}])">複製寄件資料</button>
-               <button class="pb-qc" style="background:#2a7d3f" onclick="openSfWeb()">開網上寄件</button>
+               <button class="pb-qc" style="background:#2a7d3f" onclick="openSfWeb(orders[${idx}])">開網上寄件</button>
                ${o.sf && o.sf.waybill_no
                  ? `<button class="pb-qc" style="background:#d43b2d" onclick="printSf(orders[${idx}])">SF 列印託運單</button>`
                  : `<button class="pb-qc" style="background:#d43b2d" onclick="openSfWaybill(orders[${idx}])">SF 開運單</button>`}`
