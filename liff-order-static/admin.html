@@ -770,6 +770,40 @@ function exportConfirmXlsx(o) {
     openDoc("印製確認單", body, o.order_no);
   }
 
+  /* ---- 順豐半自動：複製寄件資料 → 貼到網上寄件 ---- */
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text)
+        .then(() => alert("已複製寄件資料，請貼到順豐網上寄件表單"))
+        .catch(() => legacyCopy(text));
+    } else legacyCopy(text);
+  }
+  function legacyCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); alert("已複製寄件資料，請貼到順豐網上寄件表單"); }
+    catch (e) { prompt("請手動複製以下內容：", text); }
+    document.body.removeChild(ta);
+  }
+  function copyShip(o) {
+    const name = o.recipient_name || o.rv_name || "";
+    const phone = o.recipient_phone || o.rv_phone || "";
+    const addr = o.recipient_address || o.rv_addr || o.rv_address || "";
+    const qty = (o.files || []).reduce((s, f) => s + (Number(f.qty) || 1), 0) || 1;
+    copyText([
+      `訂單編號：${o.order_no || ""}`,
+      `收件人：${name}`,
+      `收件電話：${phone}`,
+      `收件地址：${addr}`,
+      `件數：${qty} 件（影印打印成品）`,
+    ].filter(line => !/：$/.test(line)).join("\n"));
+  }
+  function openSfWeb() {
+    window.open("https://htm.sf-express.com/we/ow", "_blank", "noopener");
+  }
+
   /* ---- 順豐運單：後台開單 → 列印託運單 ---- */
   async function openSfWaybill(o) {
     const api = $("api2").value.trim().replace(/\/+$/, "");
@@ -983,9 +1017,11 @@ function exportConfirmXlsx(o) {
           <button class="pb-qc" onclick="printQc(orders[${idx}])">QC 品管確認單</button>
           <button class="pb-qc" style="background:#1d5f8f" onclick="printQuote(orders[${idx}])">Q 印製確認單</button>
           ${String(o.logistics_method || "").includes("順豐")
-            ? (o.sf && o.sf.waybill_no
-                ? `<button class="pb-qc" style="background:#d43b2d" onclick="printSf(orders[${idx}])">SF 列印託運單</button>`
-                : `<button class="pb-qc" style="background:#d43b2d" onclick="openSfWaybill(orders[${idx}])">SF 開運單</button>`)
+            ? `<button class="pb-qc" style="background:#2a7d3f" onclick="copyShip(orders[${idx}])">複製寄件資料</button>
+               <button class="pb-qc" style="background:#2a7d3f" onclick="openSfWeb()">開網上寄件</button>
+               ${o.sf && o.sf.waybill_no
+                 ? `<button class="pb-qc" style="background:#d43b2d" onclick="printSf(orders[${idx}])">SF 列印託運單</button>`
+                 : `<button class="pb-qc" style="background:#d43b2d" onclick="openSfWaybill(orders[${idx}])">SF 開運單</button>`}`
             : ""}
         </div>
         <div class="manage-row" data-no="${esc(o.order_no)}">

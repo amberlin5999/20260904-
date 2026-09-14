@@ -713,6 +713,25 @@ async function iuopDispatch(env, msgType, payload) {
   return j;
 }
 
+// 台灣縣市/鄉鎮市區 → 郵遞區號（寄收件人 postCode 用；查不到留空）
+const TW_POST = {
+  "台北市": { "中正區": "100", "大同區": "103", "中山區": "104", "松山區": "105", "大安區": "106", "萬華區": "108", "信義區": "110", "士林區": "111", "北投區": "112", "內湖區": "114", "南港區": "115", "文山區": "116" },
+  "新北市": { "板橋區": "220", "新店區": "231", "三重區": "241", "中和區": "235", "永和區": "234", "新莊區": "242", "土城區": "236", "蘆洲區": "247", "樹林區": "238", "汐止區": "221", "淡水區": "251", "泰山區": "243", "林口區": "244", "五股區": "248", "鶯歌區": "239", "三峽區": "237", "瑞芳區": "224", "深坑區": "222" },
+  "桃園市": { "桃園區": "330", "中壢區": "320", "平鎮區": "324", "八德區": "334", "楊梅區": "326", "蘆竹區": "338", "大溪區": "335", "龍潭區": "325", "龜山區": "333" },
+  "台中市": { "中區": "400", "東區": "401", "南區": "402", "西區": "403", "北區": "404", "北屯區": "406", "西屯區": "407", "南屯區": "408", "太平區": "411", "大里區": "412", "豐原區": "420", "潭子區": "427", "大雅區": "428", "沙鹿區": "433", "清水區": "436" },
+  "台南市": { "中西區": "700", "東區": "701", "南區": "702", "北區": "704", "安平區": "708", "安南區": "709", "永康區": "710", "歸仁區": "711", "新化區": "712" },
+  "高雄市": { "新興區": "800", "前金區": "801", "苓雅區": "802", "鹽埕區": "803", "鼓山區": "804", "前鎮區": "806", "三民區": "807", "楠梓區": "811", "左營區": "813", "鳳山區": "830", "仁武區": "814", "岡山區": "820" },
+  "基隆市": { "七堵區": "206", "暖暖區": "205", "安樂區": "204", "中山區": "203", "中正區": "202", "信義區": "201", "仁愛區": "200" },
+  "新竹市": { "東區": "300", "北區": "300", "香山區": "300" },
+  "嘉義市": { "東區": "600", "西區": "600" },
+};
+function twPostalCode(addr) {
+  const s = String(addr || "").replace(/臺/g, "台");
+  const m = s.match(/^([^鄉鎮市區]{1,5}[縣市])?([^縣市鄉鎮市區]{1,4}[鄉鎮市區])/);
+  if (!m) return "";
+  return (TW_POST[m[1]] && TW_POST[m[1]][m[2]]) || "";
+}
+
 // 台灣境內 IUOP 運單 payload（欄位依 IUOP 文件，如有不符再調整）
 function buildIuopPayload(order, env) {
   const contact = order.recipient_name || order.rv_name || "";
@@ -722,6 +741,9 @@ function buildIuopPayload(order, env) {
   return {
     customerCode: env.SF_CUSTOMER_CODE,
     customerOrderNo: order.order_no,
+    interProductCode: env.SF_INTER_PRODUCT_CODE || "",
+    declaredCurrency: "TWD",
+    declaredValue: Number(order.total || order.amount || order.price) || 1,
     parcelQuantity: 1,
     parcelTotalWeight: 1,
     parcelWeightUnit: "KG",
@@ -752,7 +774,7 @@ function buildIuopPayload(order, env) {
       regionFirst: env.SF_SENDER_CITY || "",
       regionSecond: env.SF_SENDER_COUNTY || "",
       address: env.SF_SENDER_ADDRESS || "",
-      postCode: "",
+      postCode: env.SF_SENDER_POSTCODE || "231",
     },
     receiverInfo: {
       cargoType: 1,
@@ -764,7 +786,7 @@ function buildIuopPayload(order, env) {
       regionFirst: "",
       regionSecond: "",
       address,
-      postCode: "",
+      postCode: twPostalCode(address),
     },
     remark: "",
     orderOperateType: "1",
@@ -803,12 +825,21 @@ async function sfWaybill(request, env, no) {
       }, 502];
     }
     let data = json.apiResultData;
-    if (typeof data === "string") {
-      try { data = JSON.parse(data); } catch (e) {
-        try { data = JSON.parse(await iuopAesDecrypt(data, env.SF_AES_KEY)); } catch (e2) { data = {}; }
+    let decryptedText = "";
+    if (typeof data === "string" && data.length) {
+      // apiResultData 是「外層 JSON 再加密」的密文，先解開看內層回應
+      try {
+        decryptedText = await iuopAesDecrypt(data, env.SF_AES_KEY);
+        console.log("[順豐內層回應]", String(decryptedText).slice(0, 1000));
+        try { data = JSON.parse(decryptedText); } catch (e3) { data = decryptedText; }
+      } catch (e2) {
+        console.log("[順豐密文解碼失敗]", String(e2).slice(0, 300));
+        try { data = JSON.parse(data); } catch (e) { data = {}; }
       }
     }
     data = data || {};
+    if (data.success === false)
+      return [{ ok: false, error: data.msg || data.apiErrorMsg || data.errorMsg || "順豐拒絕下單", errorCode: data.code || "", raw: data }, 502];
     const inner = typeof data.data === "object" && data.data !== null ? data.data : {};
     const waybillNo =
       data.sfWaybillNo || data.waybillNo || data.mailNo ||
@@ -816,7 +847,7 @@ async function sfWaybill(request, env, no) {
       (data.waybillNoList && data.waybillNoList[0] && data.waybillNoList[0].waybillNo) ||
       (data.waybillNoInfoList && data.waybillNoInfoList[0] && data.waybillNoInfoList[0].waybillNo) || "";
     if (!waybillNo)
-      return [{ ok: false, error: "順豐已受理但未回傳運單號", raw: json }, 502];
+      return [{ ok: false, error: "順豐已受理但未回傳運單號", raw: decryptedText ? JSON.parse(decryptedText) : json }, 502];
     order.sf = {
       waybill_no: waybillNo,
       order_id: order.order_no,
