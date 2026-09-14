@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         順豐網上寄件 自動填寫收件資料
 // @namespace    aceeprint-dtf
-// @version      0.5
+// @version      0.6
 // @description  admin「複製寄件資料」後，到順豐網上寄件頁點到表單處，自動填入姓名/手機/詳細地址
 // @match        https://htm.sf-express.com/*
-// @match        https://*.sf-express.com/we/ow/*
+// @match        https://*.sf-express.com/*
 // @match        http://htm.sf-express.com/*
 // @grant        GM_registerMenuCommand
-// @run-at       document-idle
+// @grant        window.onurlchange
+// @run-at       document-start
 // ==/UserScript==
 
 (function () {
@@ -15,14 +16,18 @@
 
   const CLIP_RE = /收件人：([^\n]*)[\s\S]*?收件電話：([^\n]*)[\s\S]*?收件地址：([^\n]*)/;
 
+  function isShipPage() {
+    return /we\/ow|ship|tw\/tc/.test(location.href);
+  }
+
   function flash(msg, color) {
     try {
       const bar = document.createElement('div');
       bar.textContent = msg;
-      bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:' + (color || '#ffd400') + ';color:#333;font:16px/1.4 system-ui,sans-serif;font-weight:700;padding:10px 14px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.3)';
+      bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:' + (color || '#ffd400') + ';color:#333;font:16px/1.4 system-ui,sans-serif;font-weight:700;padding:10px 14px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.35)';
       document.documentElement.appendChild(bar);
       setTimeout(() => bar.remove(), 2500);
-    } catch (e) { console.log('SF-AUTOFILL flash:', msg); }
+    } catch (e) {}
   }
 
   function setNativeValue(el, value) {
@@ -104,15 +109,36 @@
     document.removeEventListener('keydown', onGesture, true);
     setTimeout(autoFill, 350);
   }
-  document.addEventListener('pointerdown', onGesture, true);
-  document.addEventListener('keydown', onGesture, true);
 
-  try {
-    console.log('[SF-AUTOFILL] v0.5 active on', location.href);
-    if (/we\/ow|ship/.test(location.href)) flash('SF 自填腳本 v0.5 已載入');
-  } catch (e) {}
+  let inited = false;
+  function init() {
+    if (inited) return;
+    inited = true;
+    document.addEventListener('pointerdown', onGesture, true);
+    document.addEventListener('keydown', onGesture, true);
+    try {
+      console.log('[SF-AUTOFILL] v0.6 active on', location.href);
+      if (isShipPage()) flash('SF 自填腳本 v0.6 已載入');
+    } catch (e) {}
+  }
 
   GM_registerMenuCommand('填入收件資料（順豐）', () => {
     autoFill();
   });
+
+  if (window.onurlchange !== null) {
+    window.onurlchange = function (url) {
+      if (/we\/ow|ship|tw\/tc/.test(url)) {
+        setTimeout(init, 300);
+      }
+    };
+  }
+
+  if (isShipPage()) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      setTimeout(init, 300);
+    }
+  }
 })();
